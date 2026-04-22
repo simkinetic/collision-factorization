@@ -2,6 +2,7 @@
 % Generates the factorized collision tensors (R_tensor and Gaunt lists)
 % for various angular resolutions with VHS viscosity index omega = 0.5.
 clear; clc; close all;
+addpath('src', 'src/mex','src/SHL');
 
 fprintf('==============================================================\n');
 fprintf('  BATCH PRECOMPUTATION: Hard Sphere Collision Tensors\n');
@@ -18,8 +19,8 @@ end
 K_max = 4;
 L_max_list = [4, 6, 8, 10, 13, 16];
 
-% VHS Viscosity Index for Hard Spheres
-vhs_omega = 0.5; 
+% VHS Viscosity Index
+vhs_omega = 1.0; 
 
 % For VHS, the collision kernel depends on relative velocity as |u|^alpha
 % where alpha = 2 * (1 - omega). For Hard Spheres, alpha = 1.0.

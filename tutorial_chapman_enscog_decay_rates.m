@@ -4,7 +4,7 @@
 % it directly against the exact analytical Bracket Integral matrix 
 % derived in classical Chapman-Cowling kinetic theory.
 
-clear; clc;
+clear; clc; addpath('src', 'src/mex','src/SHL');
 fprintf('==============================================================\n');
 fprintf('  BENCHMARK: Chapman-Enskog Matrix & Viscosity Corrections\n');
 fprintf('==============================================================\n\n');
