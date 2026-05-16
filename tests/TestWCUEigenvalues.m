@@ -19,17 +19,15 @@ classdef TestWCUEigenvalues < matlab.unittest.TestCase
             Basis = SpectralBasis(testCase.K_max, testCase.L_max);
             N_terms = Basis.N_terms;
             
-            % Maxwellian molecules (alpha = 0.0) guarantee exact theoretical matching
-            alpha = 0.0;
-            N_max = 5;
-            kernel_tol = 1e-6;
+            % Maxwellian molecules (gamma = 0.0) guarantee exact theoretical matching
+            gamma = 0.0;
             
             fprintf('1. Building the Exact Numerical Collision Tensor...\n');
-            Kernel = ScatteringKernel(testCase.K_max, testCase.L_max, N_max, alpha, kernel_tol);
+            Kernel = ScatteringKernel(gamma);
             TensorObj = GeneralCollisionTensor(Basis, Kernel);
             
-            % Generate using MEX (or false for MATLAB native)
-            TensorObj.generate_R_tensor(true);
+            % Generate using the sum-factorized routine with high precision padding
+            TensorObj.generate_R_tensor_sumfac(16, 16);
             C_assembled = TensorObj.assemble_full_tensor();
             
             %% 2. Extract Numerical Spectrum
@@ -43,12 +41,12 @@ classdef TestWCUEigenvalues < matlab.unittest.TestCase
             
             %% 3. Generate Analytical WCU Spectrum
             fprintf('3. Computing Analytical WCU Spectrum...\n');
-            % Pass the Kernel object instead of a raw function handle
-            lambda_wcu = testCase.compute_wcu_spectrum(testCase.K_max, testCase.L_max, Kernel);
+            lambda_wcu = testCase.compute_wcu_spectrum(testCase.K_max, testCase.L_max);
             
             %% 4. Normalize
             % The first 5 modes are invariants (0). The 6th mode is the first 
             % true decaying relaxation mode (usually L=2 Stress or K=1 Heat Flux).
+            % We divide by its absolute magnitude so the first physical mode is -1.0.
             norm_num = abs(lambda_num(6));
             norm_wcu = abs(lambda_wcu(6));
             
@@ -88,14 +86,16 @@ classdef TestWCUEigenvalues < matlab.unittest.TestCase
     
     methods (Access = private)
         
-        function lambda_exact = compute_wcu_spectrum(testCase, K_max, L_max, kernel_obj)
+        function lambda_exact = compute_wcu_spectrum(~, K_max, L_max)
             % High-order quadrature for exact theoretical integration
             qr = Gauss.legendre(200, -1, 1);
             mu = qr.x;
             w = qr.w;
             
-            % Evaluate using the Kernel object's internal method
-            B_vals = kernel_obj.evaluate(1.0, mu); 
+            % For VHS (Variable Hard Sphere) models like Hard Spheres and Maxwell 
+            % Molecules, the angular scattering is purely isotropic. Therefore, 
+            % the angular dependence B(cos X) is simply a constant.
+            B_vals = ones(size(mu)); 
             
             % Half-angle trigonometric identities
             c = sqrt((1 + mu) / 2);
