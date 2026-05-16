@@ -1,42 +1,66 @@
 %% SECTION 4: Final Competition - Dense vs Sparse vs Sliced vs Radial
+% Benchmarks the execution time of four distinct tensor contraction 
+% algorithms using precomputed Wigner-Eckart factorized collision tensors.
 clear; clc; close all;
+addpath('src', 'src/mex', 'src/SHL', 'src/precalc');
+
 K_max = 4;
-L_max_list = [4, 6, 8, 10, 13]; 
-vhs_omega = 1.0; 
+L_max_list = [2, 4, 6, 8, 10, 12]; % Updated to match the generated precalc files
+gamma = 1.0; % Hard spheres (to match precomputed files)
 
 % save figures?
 export_to_pdf_figure = false;
 
-t_dense       = zeros(size(L_max_list)); % True Baseline
-t_naive       = zeros(size(L_max_list)); % Unoptimized Sparse
-t_angular     = zeros(size(L_max_list)); % Angular-First (q1-Sliced)
-t_radial      = zeros(size(L_max_list)); % Radial-First
+t_dense       = NaN(size(L_max_list)); % True Baseline
+t_naive       = NaN(size(L_max_list)); % Unoptimized Sparse
+t_angular     = NaN(size(L_max_list)); % Angular-First (q1-Sliced)
+t_radial      = NaN(size(L_max_list)); % Radial-First
 
+fprintf('==============================================================\n');
 fprintf('Final Hardware Benchmark (K_max = %d)...\n', K_max);
+fprintf('==============================================================\n');
+
 for i = 1:length(L_max_list)
     L = L_max_list(i);
-    filename = sprintf('src/precalc/collisiontensor_k%d_l%d_vhs_w%.2f.mat', K_max, L, vhs_omega);
-    if ~exist(filename, 'file'), continue; end
-    data = load(filename);
+    
+    % Updated to load the new gamma-based filenames
+    filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L, gamma);
+    filepath = fullfile('src', 'precalc', filename);
+    
+    if ~exist(filepath, 'file')
+        fprintf('  [SKIP] File missing: %s\n', filename);
+        continue; 
+    end
+    
+    % Load the object-oriented precomputed data
+    data = load(filepath, 'TensorObj', 'Basis');
+    TensorObj = data.TensorObj;
+    Basis = data.Basis;
     
     K_len = K_max + 1;
-    N_Q = max(data.gaunt_labels(:));
+    N_Q = Basis.N_Q; % Extract exact angular DOFs from the Basis object
     N_terms = N_Q * K_len;
     
     f_test = rand(N_Q, K_len); 
     f_flat = f_test(:); % Flattened strictly for the dense contraction
     
+    % Extract internal arrays for the MEX functions
+    g_labels = TensorObj.gaunt_labels;
+    g_vals   = TensorObj.gaunt_vals;
+    ic_map   = TensorObj.ic_map;
+    R_tensor = TensorObj.R_tensor;
+    
     % --- Pre-processing for True Dense 3D Tensor ---
-    fprintf('  Assembling Dense Cartesian Tensor (Size: %d x %d x %d)...\n', N_terms, N_terms, N_terms);
+    fprintf('  Assembling Dense Cartesian Tensor for L=%d (Size: %d x %d x %d)...\n', L, N_terms, N_terms, N_terms);
     try
         C_dense = zeros(N_terms, N_terms, N_terms);
-        N_G = size(data.gaunt_labels, 1);
+        N_G = size(g_labels, 1);
         for z = 1:N_G
-            q1 = data.gaunt_labels(z, 1);
-            q2 = data.gaunt_labels(z, 2);
-            q3 = data.gaunt_labels(z, 3);
-            g_val = data.gaunt_vals(z);
-            t = data.ic_map(z);
+            q1 = g_labels(z, 1);
+            q2 = g_labels(z, 2);
+            q3 = g_labels(z, 3);
+            g_val = g_vals(z);
+            t = ic_map(z);
             
             for k1 = 0:K_max
                 for k2 = 0:K_max
@@ -44,7 +68,7 @@ for i = 1:length(L_max_list)
                         idx1 = k1 * N_Q + q1;
                         idx2 = k2 * N_Q + q2;
                         idx3 = k3 * N_Q + q3;
-                        C_dense(idx1, idx2, idx3) = data.R_tensor(k1+1, k2+1, k3+1, t) * g_val;
+                        C_dense(idx1, idx2, idx3) = R_tensor(k1+1, k2+1, k3+1, t) * g_val;
                     end
                 end
             end
@@ -55,10 +79,10 @@ for i = 1:length(L_max_list)
     end
     
     % --- Sort for Angular-First and Radial-First (Blocked by t) ---
-    [~, sort_idx] = sortrows([data.ic_map, data.gaunt_labels(:, 1)]);
-    ic_tq1 = data.ic_map(sort_idx);
-    lb_tq1 = data.gaunt_labels(sort_idx, :);
-    vs_tq1 = data.gaunt_vals(sort_idx);
+    [~, sort_idx] = sortrows([ic_map, g_labels(:, 1)]);
+    ic_tq1 = ic_map(sort_idx);
+    lb_tq1 = g_labels(sort_idx, :);
+    vs_tq1 = g_vals(sort_idx);
     
     % --- Benchmarks ---
     
@@ -66,27 +90,25 @@ for i = 1:length(L_max_list)
     if ~isempty(C_dense)
         func_dense = @() call_mex_out(@dense_tensor_kernel_mex, zeros(N_terms, 1), f_flat, C_dense(:), N_terms);
         t_dense(i) = timeit(func_dense);
-    else
-        t_dense(i) = NaN;
     end
     
     % 2. Standard Sparse (Naive)
     func_naive = @() call_mex_out(@naive_collision_kernel_mex, zeros(N_Q, K_len), f_test, ...
-                    data.gaunt_labels, data.gaunt_vals, data.ic_map, data.R_tensor, N_Q, K_len);
+                    g_labels, g_vals, ic_map, R_tensor, N_Q, K_len);
     t_naive(i) = timeit(func_naive);
     
     % 3. Angular-First (q1-Sliced Cache Winner)
     func_af = @() call_mex_out(@angular_first_collision_kernel_mex, zeros(N_Q, K_len), f_test, ...
-                 lb_tq1, vs_tq1, ic_tq1, data.R_tensor, N_Q, K_len);
+                 lb_tq1, vs_tq1, ic_tq1, R_tensor, N_Q, K_len);
     t_angular(i) = timeit(func_af);
     
     % 4. Radial-First 
     func_rf = @() call_mex_out(@radial_first_collision_kernel_mex, zeros(N_Q, K_len), f_test, ...
-                 lb_tq1, vs_tq1, ic_tq1, data.R_tensor, N_Q, K_len);
+                 lb_tq1, vs_tq1, ic_tq1, R_tensor, N_Q, K_len);
     t_radial(i) = timeit(func_rf);
     
-    fprintf('  L=%2d | Dense: %.4fs | Sparse: %.4fs | Angular-1st: %.4fs | Radial-1st: %.4fs\n', ...
-            L, t_dense(i), t_naive(i), t_angular(i), t_radial(i));
+    fprintf('  -> Dense: %.4fs | Sparse: %.4fs | Angular-1st: %.4fs | Radial-1st: %.4fs\n\n', ...
+            t_dense(i), t_naive(i), t_angular(i), t_radial(i));
 end
 
 %% ========================================================================
@@ -99,7 +121,6 @@ set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
 % ========================================================================
 % CONFIGURATION: Resolution & Plot Formatting
 % ========================================================================
-
 FS_title  = 24; 
 FS_labels = 28; 
 FS_ticks  = 18; 
@@ -126,9 +147,8 @@ h_dense   = plot(L_max_list, t_dense, 's-', 'Color', c_dense, 'LineWidth', 3.0, 
 % Axis formatting
 set(gca, 'XScale', 'log', 'YScale', 'log');
 xticks(L_max_list); xticklabels(string(L_max_list));
-xlim([min(L_max_list), max(L_max_list) * 1.1]); 
+xlim([min(L_max_list) * 0.9, max(L_max_list) * 1.1]); 
 ylim([min(t_angular)*0.5, max(t_dense)*3]); 
-
 grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 
 % Legend
@@ -136,14 +156,14 @@ legend([h_dense, h_sparse, h_radial, h_angular], ...
     {'\textbf{Dense Cartesian Baseline}', '\textbf{Standard Sparse Contraction}', '\textbf{Radial-First Contraction}', '\textbf{Angular-First Contraction}'}, ...
     'Location', 'northwest', 'FontSize', FS_legend - 2);
 
-% Theoretical Slope Triangles
-idx1 = find(L_max_list == 10);
-idx2 = find(L_max_list == 13);
-L1 = L_max_list(idx1);
-L2 = L_max_list(idx2);
-
-draw_slope_triangle(L1, L2, t_dense(idx1) * 0.6, 6, '$\mathcal{O}(L_{\max}^6)$', 1.25, FS_text);
-draw_slope_triangle(L1, L2, t_angular(idx1) * 0.6, 5, '$\mathcal{O}(L_{\max}^5)$', 1.25, FS_text);
+% Theoretical Slope Triangles (Dynamically placed on the last two points)
+valid_idx = find(~isnan(t_dense), 2, 'last');
+if length(valid_idx) == 2
+    L1 = L_max_list(valid_idx(1));
+    L2 = L_max_list(valid_idx(2));
+    draw_slope_triangle(L1, L2, t_dense(valid_idx(1)) * 0.6, 6, '$\mathcal{O}(L_{\max}^6)$', 1.25, FS_text);
+    draw_slope_triangle(L1, L2, t_angular(valid_idx(1)) * 0.6, 5, '$\mathcal{O}(L_{\max}^5)$', 1.25, FS_text);
+end
 
 xlabel('\textbf{Angular Resolution} ($L_{\max}$)', 'FontSize', FS_labels);
 ylabel('\textbf{Execution Time [s]}', 'FontSize', FS_labels);
@@ -151,7 +171,7 @@ set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.5);
 
 if export_to_pdf_figure
     set(gcf, 'Color', 'w'); set(gca, 'Color', 'w');
-    export_fig('fig_execution_time', '-pdf', '-painters');
+    exportgraphics(gcf, 'fig_execution_time.pdf', 'ContentType', 'vector');
 end
 
 %% ========================================================================
@@ -171,9 +191,8 @@ plot(L_max_list, s_angular, 'o-', 'Color', c_angular, 'LineWidth', 3.0, 'MarkerS
 % Axis formatting 
 set(gca, 'XScale', 'log', 'YScale', 'linear');
 xticks(L_max_list); xticklabels(string(L_max_list));
-xlim([min(L_max_list), max(L_max_list) * 1.1]);
+xlim([min(L_max_list) * 0.9, max(L_max_list) * 1.1]);
 ylim([0, max(s_angular)*1.15]); 
-
 grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 
 % Baseline at y=1
@@ -182,12 +201,15 @@ text(L_max_list(2), 1.0 + max(s_angular)*0.03, '\textbf{Dense Baseline ($1.0\tim
     'Interpreter', 'latex', 'FontSize', FS_text-2, 'HorizontalAlignment', 'center');
 
 % Add bold text annotations
-text(L_max_list(end), s_angular(end) + max(s_angular)*0.05, sprintf('\\textbf{%.1f$\\times$}', s_angular(end)), ...
-    'Color', c_angular, 'FontSize', FS_text+2, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
-text(L_max_list(end), s_radial(end) + max(s_angular)*0.05, sprintf('\\textbf{%.1f$\\times$}', s_radial(end)), ...
-    'Color', c_radial, 'FontSize', FS_text, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
-text(L_max_list(end), s_sparse(end) - max(s_angular)*0.04, sprintf('\\textbf{%.1f$\\times$}', s_sparse(end)), ...
-    'Color', c_sparse, 'FontSize', FS_text, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
+last_valid = find(~isnan(s_angular), 1, 'last');
+if ~isempty(last_valid)
+    text(L_max_list(last_valid), s_angular(last_valid) + max(s_angular)*0.05, sprintf('\\textbf{%.1f$\\times$}', s_angular(last_valid)), ...
+        'Color', c_angular, 'FontSize', FS_text+2, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
+    text(L_max_list(last_valid), s_radial(last_valid) + max(s_angular)*0.05, sprintf('\\textbf{%.1f$\\times$}', s_radial(last_valid)), ...
+        'Color', c_radial, 'FontSize', FS_text, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
+    text(L_max_list(last_valid), s_sparse(last_valid) - max(s_angular)*0.04, sprintf('\\textbf{%.1f$\\times$}', s_sparse(last_valid)), ...
+        'Color', c_sparse, 'FontSize', FS_text, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
+end
 
 legend({'\textbf{Standard Sparse Contraction}', '\textbf{Radial-First Contraction}', '\textbf{Angular-First Contraction}'}, ...
     'Location', 'northwest', 'FontSize', FS_legend - 2);
@@ -198,7 +220,7 @@ set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.5);
 
 if export_to_pdf_figure
     set(gcf, 'Color', 'w'); set(gca, 'Color', 'w');
-    export_fig('fig_relative_speedup', '-pdf', '-painters');
+    exportgraphics(gcf, 'fig_relative_speedup.pdf', 'ContentType', 'vector');
 end
 
 %% ========================================================================

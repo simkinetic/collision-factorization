@@ -1,6 +1,6 @@
 %% Precompute and Save Spectral Collision Tensors (Hard Spheres Only)
 % Generates the factorized collision tensors (R_tensor and Gaunt lists)
-% for various angular resolutions with VHS viscosity index omega = 0.5.
+% for various angular resolutions.
 clear; clc; close all;
 addpath('src', 'src/mex','src/SHL');
 
@@ -17,24 +17,23 @@ end
 
 % --- Configuration ---
 K_max = 4;
-L_max_list = [4, 6, 8, 10, 13, 16];
+L_max_list = [2, 4, 6];
+pad = 20; % Quadrature padding for high-precision precomputation
 
-% VHS Viscosity Index
-vhs_omega = 1.0; 
-
-% For VHS, the collision kernel depends on relative velocity as |u|^alpha
-% where alpha = 2 * (1 - omega). For Hard Spheres, alpha = 1.0.
-alpha = 2 * (1 - vhs_omega);
+% Interaction Potential / Kernel Singularity Order
+% gamma = 1.0 corresponds to Hard Spheres, gamma = 0.0 to Maxwell molecules.
+gamma = 0.0; 
 
 fprintf('==============================================================\n');
-fprintf('  Processing Hard Sphere Kernel: omega = %.2f (alpha = %.2f)\n', vhs_omega, alpha);
+fprintf('  Processing Hard Sphere Kernel: gamma = %.2f\n', gamma);
+fprintf('  Quadrature Padding: %d\n', pad);
 fprintf('==============================================================\n');
 
 for l_idx = 1:length(L_max_list)
     L = L_max_list(l_idx);
     
-    % Target filename
-    filename = sprintf('collisiontensor_k%d_l%d_vhs_w%.2f.mat', K_max, L, vhs_omega);
+    % Target filename updated to reflect gamma instead of omega
+    filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L, gamma);
     filepath = fullfile(out_dir, filename);
     
     if exist(filepath, 'file')
@@ -44,21 +43,20 @@ for l_idx = 1:length(L_max_list)
     
     fprintf('\nGenerating Tensor for K_max = %d, L_max = %d...\n', K_max, L);
     
-    % 1. Initialize Basis and Kernel
+    % 1. Initialize Basis and Kernel directly with gamma
     Basis = SpectralBasis(K_max, L);
-    
-    Kernel = ScatteringKernel(K_max, L, 5, alpha, 1e-6);
+    Kernel = ScatteringKernel(gamma);
     
     % 2. Initialize the Tensor Object
     TensorObj = GeneralCollisionTensor(Basis, Kernel);
     
-    % 3. Compute the dense physical R_tensor using the fast C++ MEX routine
+    % 3. Compute the dense physical R_tensor using the sum-factorized routine
     tic;
-    TensorObj.generate_R_tensor(true);
+    TensorObj.generate_R_tensor_sumfac(pad, pad);
     t_gen = toc;
     fprintf('  -> Tensor generation complete in %.2f seconds.\n', t_gen);
     
-    % 4. Save the objects to disk (-v7.3 required for large files at L=13, L=16)
+    % 4. Save the objects to disk (-v7.3 required for large files)
     fprintf('  -> Saving to %s...\n', filepath);
     save(filepath, 'TensorObj', 'Basis', 'Kernel', '-v7.3');
     fprintf('  -> Save complete.\n');

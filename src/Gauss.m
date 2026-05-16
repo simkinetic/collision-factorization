@@ -104,7 +104,7 @@ classdef Gauss
             end
         end
 
-        function qr = generalized_laguerre(N, alpha)
+        function qr = generalized_laguerre_2(N, alpha)
             % GENLAGUERRE Returns Generalized Gauss-Laguerre nodes and weights
             % Weight: x^alpha * e^-x on [0, inf)
             if nargin < 2 || isempty(alpha), alpha = 0; end
@@ -125,6 +125,55 @@ classdef Gauss
             qr.w = gamma(alpha + 1) .* (V(1, :)').^2;
         end
         
+        function qr = generalized_laguerre(N, alpha)
+            % GENLAGUERRE Returns Generalized Gauss-Laguerre nodes and weights.
+            % Uses Newton-Raphson polishing and derivative-based weight calculation 
+            % to achieve machine precision, matching FastGaussQuadrature.jl logic.
+            if nargin < 2 || isempty(alpha), alpha = 0; end
+            
+            % 1. Initial root guesses via Golub-Welsch eigenvalues
+            i = 1:N;
+            a = 2.*i - 1 + alpha;
+            b = sqrt( i(1:N-1) .* (i(1:N-1) + alpha) );
+            J = diag(a) + diag(b, 1) + diag(b, -1);
+            x = sort(eig(J)); % Eigenvalues are stable, eigenvectors are not!
+            
+            % 2. Newton-Raphson root polishing
+            for iter = 1:15
+                L0 = ones(N, 1);
+                L1 = 1 + alpha - x;
+                Lp0 = zeros(N, 1);
+                Lp1 = -ones(N, 1);
+                
+                for k = 2:N
+                    % 3-term recurrence for Laguerre polynomial and its derivative
+                    L2 = ((2*k - 1 + alpha - x) .* L1 - (k - 1 + alpha) .* L0) / k;
+                    Lp2 = ((2*k - 1 + alpha - x) .* Lp1 - L1 - (k - 1 + alpha) .* Lp0) / k;
+                    
+                    L0 = L1; L1 = L2;
+                    Lp0 = Lp1; Lp1 = Lp2;
+                end
+                
+                % Newton step
+                dx = L1 ./ Lp1;
+                x = x - dx;
+                
+                if max(abs(dx)) < 1e-15
+                    break;
+                end
+            end
+            
+            % 3. High-Precision Weight Calculation via the Derivative
+            % w_i = Gamma(N + alpha + 1) / ( N! * x_i * [L_N'(x_i)]^2 )
+            ln_const = gammaln(N + alpha + 1) - gammaln(N + 1);
+            w = exp(ln_const) ./ (x .* Lp1.^2);
+            
+            qr.x = x;
+            qr.w = w;
+        end
+
+
+
         function qr = halfrange_hermite(N, beta)
             % HALFRANGE_HERMITE Nodes and weights for Half-Range Hermite integration.
             % Computes exact quadratures for: \int_0^\infty f(x) x^2 e^{-\beta x^2} dx

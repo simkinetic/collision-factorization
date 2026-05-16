@@ -7,36 +7,35 @@
 % highly non-equilibrium "pulsating" distribution and perfectly relaxes into a 
 % standard Maxwellian.
 clear; clc; close all;
+addpath('src', 'src/mex', 'src/SHL');
 
 fprintf('==============================================================\n');
 fprintf('  TUTORIAL: The Bobylev-Krook-Wu (BKW) Exact Solution (RK2)\n');
 fprintf('==============================================================\n\n');
 
-% Do you want to export to PDF figure
+% Do you want to export to PDF figure?
 export_to_pdf_figure = false;
 
-%% 1. Initialize the Isotropic Phase Space
-% Because the BKW solution is perfectly spherically symmetric (isotropic), 
-% it depends only on the velocity magnitude, not the direction. 
-% In our spherical harmonic basis, this means we only need to evaluate L_max = 0.
+%% 1. Initialize the Phase Space
+% The BKW solution is purely isotropic (L=0). However, to explicitly verify 
+% momentum conservation, we set L_max = 1 to include the momentum vector 
+% (dipole) modes in the state vector.
 K_max = 5;  % Number of radial Laguerre polynomials
-L_max = 0;  % Restrict to isotropic modes only
+L_max = 1;  % Set to 1 to explicitly include momentum modes
+
 Basis = SpectralBasis(K_max, L_max);
 N_terms = Basis.N_terms;
 
-fprintf('1. Building the Exact Numerical Collision Tensor (K=%d, L=0)...\n', K_max);
+fprintf('1. Building the Exact Numerical Collision Tensor (K=%d, L=%d)...\n', K_max, L_max);
 
-% We use Maxwellian molecules (omega = 1.0 -> alpha = 0.0), meaning the 
+% We use Maxwellian molecules (gamma = 0.0), meaning the 
 % collision cross-section is independent of the relative velocity 'u'.
-alpha = 0.0;
-N_max = 5;
-tol   = 1e-6;
+gamma = 0.0;
 
-% Generate the scattering kernel and exact collision tensor
-Kernel = ScatteringKernel(K_max, L_max, N_max, alpha, tol);
-
+% Generate the scattering kernel and exact collision tensor using the new API
+Kernel = ScatteringKernel(gamma);
 TensorObj = GeneralCollisionTensor(Basis, Kernel);
-TensorObj.generate_R_tensor(true);
+TensorObj.generate_R_tensor_sumfac(16, 16); % High-precision padding
 
 % Assemble and flatten the tensor for rapid matrix-vector multiplication
 C_assembled = TensorObj.assemble_full_tensor();
@@ -139,17 +138,12 @@ for k = 2:K_max
 end
 
 % 2. Format Main Axes
-% title('\textbf{Nonlinear BKW Relaxation}', 'FontSize', FS_title);
 xlabel('Dimensionless Time $\tau = \mu t$', 'FontSize', FS_labels);
 ylabel('Spectral Amplitude $c_k(\tau)$', 'FontSize', FS_labels);
 set(ax_main, 'FontSize', FS_ticks, 'LineWidth', 1.2);
 xlim([0, 4]); 
 ylim([-0.04, 0.002]); % Cap slightly above 0
 yticks(-0.04:0.01:0); % Clean integer-like tick steps
-
-% 3. Custom Positioned Legend (Shifted Up)
-% leg = legend(leg_h, {'Numerical (RK2)', 'Exact Analytical'}, 'FontSize', FS_legend);
-% set(leg, 'Position', [0.55, 0.69, 0.35, 0.08]); % Moved safely away from the inset
 
 % 4. Create the Inset Plot (Enlarged)
 % [left, bottom, width, height]
@@ -191,7 +185,7 @@ text(ax_inset, 0.05, 0.05, rate_str, 'Units', 'normalized', ...
 
 % Export
 if export_to_pdf_figure
-    export_fig('fig_bkw_relaxation', '-pdf', '-painters', '-nocrop');
+    exportgraphics(fig_relax, 'fig_bkw_relaxation.pdf', 'ContentType', 'vector');
 end
 
 % ========================================================================
@@ -201,20 +195,30 @@ fig_cons = figure('Name', 'BKW Conservation', 'Position', [100, 100, 700, 400], 
 ax_sec = axes('Position', [0.12, 0.12, 0.83, 0.8]); % Define main axis bounds
 hold on; grid on;
 
-% Calculate drift relative to initial state, floring at 1e-17 to prevent axis glitches
+% Calculate drift relative to initial state, flooring at eps to prevent axis glitches
 mass_err = max(abs(c_ode(:, 1) - c_ode(1, 1)), eps());
-energy_err = max(abs(c_ode(:, Basis.N_Q + 1) - c_ode(1, Basis.N_Q + 1)), eps());
+
+% Extract Momentum (k=0, L=1, m={-1, 0, 1} -> indices 2, 3, 4)
+mom_err_x = abs(c_ode(:, 2) - c_ode(1, 2));
+mom_err_y = abs(c_ode(:, 3) - c_ode(1, 3));
+mom_err_z = abs(c_ode(:, 4) - c_ode(1, 4));
+mom_err = max(max([mom_err_x, mom_err_y, mom_err_z], [], 2), eps());
+
+% Extract Energy (k=1, L=0, m=0 -> index Basis.N_Q + 1)
+energy_idx = Basis.N_Q + 1;
+energy_err = max(abs(c_ode(:, energy_idx) - c_ode(1, energy_idx)), eps());
 
 % Subsample markers so they don't overlap (plot exactly 10 markers across the line)
 sub = round(linspace(1, length(t_out), 10));
 
-% Plot with -o and -x markers
+% Plot with distinct markers
 semilogy(t_out * mu, mass_err, 'k-o', 'LineWidth', 2, 'MarkerSize', 15, ...
     'MarkerIndices', sub, 'DisplayName', 'Mass Error $|\Delta c_0|$');
+semilogy(t_out * mu, mom_err, 'k-s', 'LineWidth', 2, 'MarkerSize', 15, ...
+    'MarkerIndices', sub, 'DisplayName', 'Momentum Error $|\Delta u|$');
 semilogy(t_out * mu, energy_err, 'k-x', 'LineWidth', 2, 'MarkerSize', 15, ...
-    'MarkerIndices', sub, 'DisplayName', 'Energy Error $|\Delta c_1|$');
+    'MarkerIndices', sub, 'DisplayName', 'Energy Error $|\Delta T|$');
 
-% title('\textbf{Numerical Conservation}', 'FontSize', FS_title);
 xlabel('Dimensionless Time $\tau = \mu t$', 'FontSize', FS_labels);
 ylabel('Absolute Error $|c(t) - c(0)|$', 'FontSize', FS_labels);
 
@@ -226,11 +230,11 @@ legend('Location', 'northeast', 'FontSize', FS_legend);
 set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.2);
 
 if export_to_pdf_figure
-    export_fig('fig_bkw_conservation', '-pdf', '-painters', '-nocrop');
+    exportgraphics(fig_cons, 'fig_bkw_conservation.pdf', 'ContentType', 'vector');
 end
 
 %% --- HELPER: EXACT CONTINUOUS BKW PROJECTOR ---
-function c_state = project_bkw(alpha, K_max, Basis)
+function c_state = project_bkw(alpha_val, K_max, Basis)
     % Integrates the continuous analytical BKW function exactly onto the spectral basis.
     % This uses highly resolved Gauss-Laguerre quadrature to prevent aliasing.
     
@@ -245,8 +249,8 @@ function c_state = project_bkw(alpha, K_max, Basis)
         v_sq = x(i);
         
         % F(v) = f_bkw(v) / e^-v^2 
-        F_val = pi^(-1.5) * (1-alpha)^(-1.5) * exp(-v_sq * alpha / (1-alpha)) * ...
-                (1 + (alpha/(1-alpha)) * (v_sq/(1-alpha) - 1.5));
+        F_val = pi^(-1.5) * (1-alpha_val)^(-1.5) * exp(-v_sq * alpha_val / (1-alpha_val)) * ...
+                (1 + (alpha_val/(1-alpha_val)) * (v_sq/(1-alpha_val) - 1.5));
                 
         % Evaluate basis at an arbitrary point on the sphere (x-axis)
         v_vec = [sqrt(v_sq), 0, 0];

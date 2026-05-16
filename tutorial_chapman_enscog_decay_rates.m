@@ -3,8 +3,9 @@
 % extracts the discrete Jacobian for the L=2 stress mode, and compares 
 % it directly against the exact analytical Bracket Integral matrix 
 % derived in classical Chapman-Cowling kinetic theory.
+clear; clc; close all;
+addpath('src', 'src/mex', 'src/SHL', 'src/precalc');
 
-clear; clc; addpath('src', 'src/mex','src/SHL');
 fprintf('==============================================================\n');
 fprintf('  BENCHMARK: Chapman-Enskog Matrix & Viscosity Corrections\n');
 fprintf('==============================================================\n\n');
@@ -12,27 +13,32 @@ fprintf('==============================================================\n\n');
 %% 1. Load Precomputed Tensor
 K_max = 4;
 L_max = 4;
-vhs_omega = 0.5; % 0.5 corresponds to Hard Spheres
+gamma = 1.0; % 1.0 corresponds to Hard Spheres
 
-filename = sprintf('src/precalc/collisiontensor_k%d_l%d_vhs_w%.2f.mat', K_max, L_max, vhs_omega);
-if ~exist(filename, 'file')
+filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L_max, gamma);
+filepath = fullfile('src', 'precalc', filename);
+
+if ~exist(filepath, 'file')
     error('Precomputed tensor %s not found. Please run the batch generation script.', filename);
 end
 
 fprintf('1. Loading Precomputed Tensor: %s\n', filename);
-data = load(filename);
+data = load(filepath, 'Basis', 'TensorObj');
 Basis = data.Basis;
 TensorObj = data.TensorObj;
 
 N_terms = Basis.N_terms;
 N_Q = Basis.N_Q;
 
+fprintf('   Assembling full 3D Cartesian tensor (this may take a moment)...\n');
 C_assembled = TensorObj.assemble_full_tensor();
 
 %% 2. Extract the L=2 Jacobian Block
 % Evaluate the collision operator Jacobian at the equilibrium Maxwellian
 c_eq = zeros(N_terms, 1);
 c_eq(1) = 1.0; 
+
+% The Jacobian at equilibrium simplifies to C(., eq, .) + C(., ., eq)
 J_eq = squeeze(C_assembled(:,:,1)) * c_eq(1) + squeeze(C_assembled(:,1,:)) * c_eq(1);
 
 % Extract the specific KxK block for the L=2 mode.

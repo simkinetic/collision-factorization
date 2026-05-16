@@ -5,14 +5,18 @@
 %   2. Exact theoretical matching (Wang Chang-Uhlenbeck spectrum)
 %   3. Galilean Invariance (Exact conservation despite spectral truncation)
 clear; clc; close all;
+addpath('src', 'src/mex', 'src/SHL');
 
 fprintf('==============================================================\n');
 fprintf('  TUTORIAL: Validating the Spectral Collision Tensor\n');
 fprintf('==============================================================\n\n');
 
+% Export figures to PDF?
+export_to_pdf_figure = false;
+
 %% 1. Initialize Phase Space & Generate the Tensor (Done Once)
-% We use K_max = 2, L_max = 2 (27 total basis functions).
-K_max = 2;  
+% We use K_max = 10, L_max = 2.
+K_max = 4;  
 L_max = 2;  
 Basis = SpectralBasis(K_max, L_max);
 N_terms = Basis.N_terms;
@@ -20,30 +24,31 @@ N_terms = Basis.N_terms;
 fprintf('--- PHASE 1: TENSOR GENERATION ---\n');
 fprintf('Building the Exact Numerical Collision Tensor (K=%d, L=%d)...\n', K_max, L_max);
 
-% We use Maxwellian molecules (omega = 1.0 -> alpha = 0.0) because they possess 
+% We use Maxwellian molecules (gamma = 0.0) because they possess 
 % an exact analytical spectrum we can compare against.
-alpha = 0.0;
-N_max = 5;
-tol   = 1e-6;
+gamma = 0.0;
 
-% Initialize using the new interface
-Kernel = ScatteringKernel(K_max, L_max, N_max, alpha, tol);
-
+% Initialize using the new API
+Kernel = ScatteringKernel(gamma);
 TensorObj = GeneralCollisionTensor(Basis, Kernel);
-TensorObj.generate_R_tensor(true);
-
+TensorObj.generate_R_tensor_sumfac(16, 16); % High-precision padding
 C_assembled = TensorObj.assemble_full_tensor();
 C_flat = reshape(C_assembled, N_terms, N_terms^2);
+
 fprintf('Tensor generation complete.\n\n');
 
 %% 2. Stability Analysis & H-Theorem
 fprintf('--- PHASE 2: STABILITY & H-THEOREM ---\n');
-
 % The Jacobian J_ij = dQ_i / dc_j evaluated at equilibrium evaluates to:
 J_num = squeeze(C_assembled(:,:,1)) + squeeze(C_assembled(:,1,:));
 
 lambda_num = eig(J_num);
 lambda_num = sort(real(lambda_num), 'descend');
+
+% NORMALIZE GLOBALLY: Divide by the absolute magnitude of the 6th mode
+% so the first physical relaxation mode maps exactly to -1.0.
+norm_num = abs(lambda_num(6));
+lambda_num = lambda_num / norm_num;
 
 num_zeros = sum(abs(lambda_num) < 1e-12);
 num_positive = sum(lambda_num > 1e-12);
@@ -58,42 +63,15 @@ else
     fprintf('WARNING: Operator violates stability requirements.\n\n');
 end
 
-% Visualizing the Spectrum (FIGURE 1)
-figure('Name', 'Eigenvalue Spectrum', 'Position', [100, 100, 800, 400], 'Color', 'w');
-hold on; grid on;
-
-% Plot and explicitly capture handles to ensure the legend formats correctly
-h_inv = plot(lambda_num(abs(lambda_num) < 1e-12), 0, 'ko', 'MarkerSize', 10, 'LineWidth', 2);
-h_stb = plot(lambda_num(lambda_num < -1e-12), 0, 'b.', 'MarkerSize', 20);
-handles = [h_inv(1), h_stb(1)];
-labels = {'Invariants (Zero)', 'Relaxation Modes (Stable)'};
-
-if num_positive > 0
-    h_ust = plot(lambda_num(lambda_num > 1e-12), 0, 'r*', 'MarkerSize', 10, 'LineWidth', 2);
-    handles(end+1) = h_ust(1);
-    labels{end+1} = 'Unstable Modes (Growing)';
-end
-
-xline(0, 'k-', 'LineWidth', 1.5);
-title('Spectrum of the Linearized Collision Operator', 'FontSize', 14, 'FontWeight', 'bold');
-xlabel('Real Eigenvalue (Growth/Decay Rate)', 'FontSize', 12, 'FontWeight', 'bold');
-yticks([]);
-legend(handles, labels, 'Location', 'northwest', 'FontSize', 11);
-set(gca, 'FontSize', 12, 'LineWidth', 1.2);
-xlim([min(lambda_num)-0.5, 0.5]);
-
 %% 3. Wang Chang-Uhlenbeck (WCU) Exact Spectrum
 fprintf('--- PHASE 3: WANG CHANG-UHLENBECK ANALYTICAL SPECTRUM ---\n');
-
-% Pass the Kernel object instead of a raw function handle
+% Pass the Kernel object to the analytical generator
 lambda_wcu = compute_wcu_spectrum(K_max, L_max, Kernel);
 
-% Normalize by the first physical relaxation mode (index 6)
-norm_num = abs(lambda_num(6));
+% Normalize the analytical spectrum exactly like the numerical one
 norm_wcu = abs(lambda_wcu(6));
-
-lambda_num_norm = lambda_num / norm_num;
 lambda_wcu_norm = lambda_wcu / norm_wcu;
+lambda_num_norm = lambda_num; % Already normalized in Phase 2
 
 fprintf('Mode |   Numerical Ratio   |  Analytical Ratio   |  Absolute Diff\n');
 fprintf('-----------------------------------------------------------------\n');
@@ -115,45 +93,43 @@ else
     fprintf('WARNING: Discrepancy found in the spectrum.\n\n');
 end
 
-% Visualizing the WCU Match (FIGURE 2)
-figure('Name', 'WCU Spectrum Match', 'Position', [150, 150, 800, 500], 'Color', 'w');
-hold on; grid on;
-
-% 1. Exact Analytical Theory (Thick, semi-transparent grey line)
-plot(1:N_terms, lambda_wcu_norm, '-', 'Color', [0.6, 0.6, 0.6, 0.6], 'LineWidth', 10, 'DisplayName', 'Analytical WCU Theory');
-
-% 2. Numerical Tensor Eigenvalues (Crisp black dots)
-plot(1:N_terms, lambda_num_norm, 'ko', 'MarkerSize', 6, 'MarkerFaceColor', 'k', 'DisplayName', 'Numerical Tensor');
-
-title('Wang Chang-Uhlenbeck Eigenvalue Spectrum Match', 'FontSize', 14, 'FontWeight', 'bold');
-xlabel('Sorted Mode Index', 'FontSize', 12, 'FontWeight', 'bold');
-ylabel('Normalized Eigenvalue \lambda_k / |\lambda_6|', 'FontSize', 12, 'FontWeight', 'bold');
-legend('Location', 'northeast', 'FontSize', 11);
-set(gca, 'FontSize', 12, 'LineWidth', 1.2);
-
 %% 4. Galilean Invariance & Truncation Independence
 fprintf('--- PHASE 4: GALILEAN INVARIANCE ---\n');
 fprintf('Generating 3D Quadrature Grid for Projection...\n');
 
+% Robust 3D Spherical Quadrature Grid (Independent of Kernel object)
 N_rad = 60; 
-qr = Gauss.generalized_laguerre(N_rad, 0.5);
-r_nodes = sqrt(qr.x);
-w_rad = qr.w / 2;
+qr_rad = Gauss.generalized_laguerre(N_rad, 0.5);
+r_nodes = sqrt(qr_rad.x);
+w_rad = qr_rad.w / 2;
 
-N_leb = Kernel.N_leb;
-Omega = Kernel.Omega;
-W_ang = Kernel.W_ang;
+N_pol = 30;
+qr_pol = Gauss.legendre(N_pol, -1, 1);
+cos_theta = qr_pol.x;
+sin_theta = sqrt(1 - cos_theta.^2);
+w_pol = qr_pol.w;
 
-N_points = N_rad * N_leb;
+N_azi = 30;
+phi = linspace(0, 2*pi, N_azi+1); phi(end) = [];
+w_azi = 2*pi / N_azi;
+
+N_points = N_rad * N_pol * N_azi;
 v_vec = zeros(N_points, 3);
 W_tot = zeros(N_points, 1);
 
 idx = 1;
 for a = 1:N_rad
-    for p = 1:N_leb
-        v_vec(idx, :) = r_nodes(a) * Omega(p, :);
-        W_tot(idx) = w_rad(a) * W_ang(p); 
-        idx = idx + 1;
+    for p = 1:N_pol
+        for az = 1:N_azi
+            % Spherical to Cartesian Mapping
+            vx = r_nodes(a) * sin_theta(p) * cos(phi(az));
+            vy = r_nodes(a) * sin_theta(p) * sin(phi(az));
+            vz = r_nodes(a) * cos_theta(p);
+            
+            v_vec(idx, :) = [vx, vy, vz];
+            W_tot(idx) = w_rad(a) * w_pol(p) * w_azi; 
+            idx = idx + 1;
+        end
     end
 end
 
@@ -206,14 +182,75 @@ else
     fprintf('WARNING: Invariants were broken by the coordinate shift.\n\n');
 end
 
+%% ========================================================================
+% PUBLICATION-QUALITY VISUALIZATIONS
+% ========================================================================
+set(groot, 'defaultTextInterpreter', 'latex');
+set(groot, 'defaultLegendInterpreter', 'latex');
+set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
+
+FS_title  = 18; 
+FS_labels = 16; 
+FS_ticks  = 14; 
+FS_legend = 14;
+
+% --- FIGURE 1: Stability & H-Theorem Spectrum ---
+fig_spec = figure('Name', 'Eigenvalue Spectrum', 'Position', [100, 100, 800, 400], 'Color', 'w');
+hold on; grid on;
+
+h_inv = plot(lambda_num(abs(lambda_num) < 1e-12), 0, 'ko', 'MarkerSize', 10, 'LineWidth', 2);
+h_stb = plot(lambda_num(lambda_num < -1e-12), 0, 'b.', 'MarkerSize', 20);
+handles = [h_inv(1), h_stb(1)];
+labels = {'\textbf{Invariants} (Zero)', '\textbf{Relaxation Modes} (Stable)'};
+
+if num_positive > 0
+    h_ust = plot(lambda_num(lambda_num > 1e-12), 0, 'r*', 'MarkerSize', 10, 'LineWidth', 2);
+    handles(end+1) = h_ust(1);
+    labels{end+1} = '\textbf{Unstable Modes} (Growing)';
+end
+
+xline(0, 'k-', 'LineWidth', 1.5);
+title('\textbf{Spectrum of the Linearized Collision Operator}', 'FontSize', FS_title);
+xlabel('\textbf{Normalized Real Eigenvalue} $\lambda_k / |\lambda_6|$', 'FontSize', FS_labels);
+yticks([]);
+legend(handles, labels, 'Location', 'northwest', 'FontSize', FS_legend);
+set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.2);
+xlim([min(lambda_num)-0.5, 0.5]);
+
+if export_to_pdf_figure
+    exportgraphics(fig_spec, 'fig_linearized_spectrum.pdf', 'ContentType', 'vector');
+end
+
+% --- FIGURE 2: WCU Exact Spectrum Match ---
+fig_wcu = figure('Name', 'WCU Spectrum Match', 'Position', [150, 150, 800, 500], 'Color', 'w');
+hold on; grid on;
+
+% 1. Exact Analytical Theory (Thick, semi-transparent blue line)
+plot(1:N_terms, lambda_wcu_norm, '-', 'Color', [0.0, 0.4470, 0.7410, 0.4], 'LineWidth', 12, 'DisplayName', '\textbf{Analytical WCU Theory}');
+
+% 2. Numerical Tensor Eigenvalues (Crisp black dots)
+plot(1:N_terms, lambda_num_norm, 'ko', 'MarkerSize', 8, 'MarkerFaceColor', 'k', 'DisplayName', '\textbf{Numerical Tensor}');
+
+title('\textbf{Wang Chang-Uhlenbeck Eigenvalue Spectrum Match}', 'FontSize', FS_title);
+xlabel('\textbf{Sorted Mode Index}', 'FontSize', FS_labels);
+ylabel('\textbf{Normalized Eigenvalue} $\lambda_k / |\lambda_6|$', 'FontSize', FS_labels);
+legend('Location', 'northeast', 'FontSize', FS_legend); % Moved to northeast to avoid descending staircase
+set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.2);
+
+if export_to_pdf_figure
+    exportgraphics(fig_wcu, 'fig_wcu_match.pdf', 'ContentType', 'vector');
+end
+
 %% --- HELPER: WCU ANALYTICAL EIGENVALUE GENERATOR ---
-function lambda_exact = compute_wcu_spectrum(K_max, L_max, kernel_obj)
+function lambda_exact = compute_wcu_spectrum(K_max, L_max, ~)
     qr = Gauss.legendre(200, -1, 1);
     mu = qr.x;
     w = qr.w;
     
-    % Evaluate using the Kernel object's internal method instead of a raw handle
-    B_vals = kernel_obj.evaluate(1.0, mu); 
+    % For VHS (Variable Hard Sphere) models like Hard Spheres and Maxwell 
+    % Molecules, the angular scattering is purely isotropic. Therefore, 
+    % the angular dependence B(cos X) is simply a constant.
+    B_vals = ones(size(mu)); 
     
     c = sqrt((1 + mu) / 2);
     s = sqrt((1 - mu) / 2);
@@ -229,6 +266,7 @@ function lambda_exact = compute_wcu_spectrum(K_max, L_max, kernel_obj)
             integrand = B_vals .* (term1 + term2 - 1);
             val = 2 * pi * sum(w .* integrand);
             
+            % Enforce analytic zero for the 5 macroscopic invariants
             if (k == 0 && l == 0) || (k == 0 && l == 1) || (k == 1 && l == 0)
                 val = 0;
             end

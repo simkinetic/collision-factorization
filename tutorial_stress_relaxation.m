@@ -7,27 +7,30 @@
 % harmonics. It validates that the nonlinear operator stably and correctly relaxes 
 % a highly non-equilibrium directional stress back to the absolute Maxwellian,
 % tracking the theoretical Chapman-Enskog decay rates.
-
 clear; clc; close all;
+addpath('src', 'src/mex', 'src/SHL', 'src/precalc');
+
 fprintf('==============================================================\n');
 fprintf('  BENCHMARK: Transient Anisotropic Stress Relaxation (RK2)\n');
 fprintf('==============================================================\n\n');
 
-% Do you want to export to PDF figure
+% Do you want to export to PDF figure?
 export_to_pdf_figure = false;
 
 %% 1. Load the Precomputed Factorized Tensor
 K_max = 4;
 L_max = 4;
-vhs_omega = 0.5; % 0.5 corresponds to Hard Spheres
+gamma = 1.0; % 1.0 corresponds to Hard Spheres
 
-filename = sprintf('src/precalc/collisiontensor_k%d_l%d_vhs_w%.2f.mat', K_max, L_max, vhs_omega);
-if ~exist(filename, 'file')
+filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L_max, gamma);
+filepath = fullfile('src', 'precalc', filename);
+
+if ~exist(filepath, 'file')
     error('Precomputed tensor %s not found. Please run the generation script.', filename);
 end
 
 fprintf('1. Loading Precomputed Tensor: %s\n', filename);
-data = load(filename);
+data = load(filepath, 'Basis', 'TensorObj');
 Basis = data.Basis;
 TensorObj = data.TensorObj;
 
@@ -136,16 +139,14 @@ end
 xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
 ylabel('Absolute Spectral Amplitude $|c_{k, L=2}|$', 'FontSize', FS_labels);
 title('\textbf{Hard Sphere Anisotropic Stress Relaxation}', 'FontSize', FS_title);
-
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 xlim([0, 4]);
 ylim([1e-6, 1e-0]);
 yticks(10.^(-6:1:0)); 
-
 legend(leg_h, leg_str, 'Location', 'northeast', 'FontSize', FS_legend);
 
 if export_to_pdf_figure
-    export_fig('fig_stress_relaxation', '-pdf', '-painters', '-nocrop');
+    exportgraphics(fig_relax, 'fig_stress_relaxation.pdf', 'ContentType', 'vector');
 end
 
 % ========================================================================
@@ -180,12 +181,11 @@ semilogy(t_out * mu_stress, energy_err, 'k-x', 'LineWidth', 2, 'MarkerSize', 12,
 xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
 ylabel('Absolute Error $|c(t) - c(0)|$', 'FontSize', FS_labels);
 title('\textbf{Conservation (Anisotropic Gas)}', 'FontSize', FS_title);
-
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 ylim([1e-18, 1e-12]); 
 yticks(10.^(-18:2:-12));
 legend('Location', 'northeast', 'FontSize', FS_legend);
 
 if export_to_pdf_figure
-    export_fig('fig_stress_conservation', '-pdf', '-painters', '-nocrop');
+    exportgraphics(fig_cons, 'fig_stress_conservation.pdf', 'ContentType', 'vector');
 end
