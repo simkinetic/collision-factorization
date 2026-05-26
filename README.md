@@ -1,3 +1,6 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20403094.svg)](https://doi.org/10.5281/zenodo.20403094)
+
+
 # Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator
 
 This repository contains the official MATLAB implementation of the numerical framework presented in the paper *Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator*.
