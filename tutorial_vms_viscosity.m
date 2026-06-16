@@ -28,7 +28,7 @@ if ~exist(filepath, 'file')
     Basis = SpectralBasis(K_max, L_max);
     Kernel = ScatteringKernel(gamma);
     TensorObj = GeneralCollisionTensor(Basis, Kernel, K_test);
-    TensorObj.generate_R_tensor_sumfac(40, 0);
+    TensorObj.generate_R_tensor_sumfac(20, 20);
     save(filepath, 'TensorObj', 'Basis', 'Kernel', '-v7.3');
 end
 
