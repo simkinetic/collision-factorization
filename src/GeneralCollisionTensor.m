@@ -49,8 +49,8 @@ classdef GeneralCollisionTensor < handle
         end
         
         function generate_R_tensor_sumfac(obj, radial_pad, angular_pad)
-            if nargin < 2, radial_pad = 40; end
-            if nargin < 3, angular_pad = 0; end
+            if nargin < 2, radial_pad = 20; end
+            if nargin < 3, angular_pad = 20; end
             
             fprintf('Initializing Sum-Factorized 5D Quadrature Grids...\n');
             obj.R_tensor(:) = 0;
