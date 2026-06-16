@@ -7,6 +7,7 @@
 % harmonics. It validates that the nonlinear operator stably and correctly relaxes 
 % a highly non-equilibrium directional stress back to the absolute Maxwellian,
 % tracking the theoretical Chapman-Enskog decay rates.
+
 clear; clc; close all;
 addpath('src', 'src/mex', 'src/SHL', 'src/precalc');
 
@@ -37,9 +38,17 @@ TensorObj = data.TensorObj;
 N_terms = Basis.N_terms;
 N_Q = Basis.N_Q;
 
+% Handle dynamic dimensions (safeguard for the updated tensor class)
+if isprop(TensorObj, 'K_test') && ~isempty(TensorObj.K_test)
+    K_test = TensorObj.K_test;
+else
+    K_test = K_max;
+end
+N_test_terms = (K_test + 1) * N_Q;
+
 % Assemble and flatten the tensor for rapid matrix-vector multiplication
 C_assembled = TensorObj.assemble_full_tensor();
-C_flat = reshape(C_assembled, N_terms, N_terms^2);
+C_flat = reshape(C_assembled, N_test_terms, N_terms^2);
 
 %% 2. Extract the Theoretical Chapman-Enskog Relaxation Rate
 % By linearizing our exact numerical tensor around the equilibrium Maxwellian state, 
@@ -47,7 +56,7 @@ C_flat = reshape(C_assembled, N_terms, N_terms^2);
 c_eq = zeros(N_terms, 1);
 c_eq(1) = 1.0; % Absolute Maxwellian
 
-J_eq = squeeze(C_assembled(:,:,1)) * c_eq(1) + squeeze(C_assembled(:,1,:)) * c_eq(1);
+J_eq = squeeze(C_assembled(1:N_terms, 1:N_terms, 1)) * c_eq(1) + squeeze(C_assembled(1:N_terms, 1, 1:N_terms)) * c_eq(1);
 
 % Dynamically find the principal L=2, m=0 stress mode index (q = 7)
 q_stress = 7; 
@@ -78,13 +87,15 @@ for n = 1:N_steps
     c_n = c_ode(n, :)';
     
     % Step 1: Predictor evaluation (k1)
-    Q_k1 = C_flat * reshape(c_n * c_n', N_terms^2, 1);
+    Q_k1_full = C_flat * reshape(c_n * c_n', N_terms^2, 1);
+    Q_k1 = Q_k1_full(1:N_terms); % Truncate to resolved space if tensor is asymmetric
     
     % Step 2: Predictor state
     c_tmp = c_n + dt * Q_k1;
     
     % Step 3: Corrector evaluation (k2)
-    Q_k2 = C_flat * reshape(c_tmp * c_tmp', N_terms^2, 1);
+    Q_k2_full = C_flat * reshape(c_tmp * c_tmp', N_terms^2, 1);
+    Q_k2 = Q_k2_full(1:N_terms);
     
     % Step 4: Corrector Update
     c_ode(n+1, :) = (c_n + 0.5 * dt * (Q_k1 + Q_k2))';
@@ -139,10 +150,12 @@ end
 xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
 ylabel('Absolute Spectral Amplitude $|c_{k, L=2}|$', 'FontSize', FS_labels);
 title('\textbf{Hard Sphere Anisotropic Stress Relaxation}', 'FontSize', FS_title);
+
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 xlim([0, 4]);
 ylim([1e-6, 1e-0]);
 yticks(10.^(-6:1:0)); 
+
 legend(leg_h, leg_str, 'Location', 'northeast', 'FontSize', FS_legend);
 
 if export_to_pdf_figure
@@ -181,6 +194,7 @@ semilogy(t_out * mu_stress, energy_err, 'k-x', 'LineWidth', 2, 'MarkerSize', 12,
 xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
 ylabel('Absolute Error $|c(t) - c(0)|$', 'FontSize', FS_labels);
 title('\textbf{Conservation (Anisotropic Gas)}', 'FontSize', FS_title);
+
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 ylim([1e-18, 1e-12]); 
 yticks(10.^(-18:2:-12));
