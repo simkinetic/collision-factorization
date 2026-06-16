@@ -12,7 +12,7 @@ fprintf('==============================================================\n\n');
 
 %% 1. Load Precomputed Tensor
 K_max = 4;
-L_max = 4;
+L_max = 2;
 gamma = 1.0; % 1.0 corresponds to Hard Spheres
 
 filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L_max, gamma);

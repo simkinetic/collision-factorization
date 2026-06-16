@@ -5,11 +5,13 @@ classdef GeneralCollisionTensor < handle
         K_max
         L_max
         D_max
+        K_test         % Test space radial degree (for VMS projection)
         
-        R_tensor       % [K x K x K x N_L] The Reduced Physical Tensor
+        R_tensor       % [K_test+1 x K_max+1 x K_max+1 x N_L] The Reduced Physical Tensor
         gaunt_labels   % [N_G x 3] Non-zero Real Gaunt transitions
         gaunt_vals     % [N_G x 1] Real Gaunt values
         ic_map         % [N_G x 1] Mapping from transitions to L-triplets
+        L_triplets     % [N_L x 3] Valid polar degree interaction channels
         
         Basis          % SpectralBasis object
         Kernel         % ScatteringKernel object
@@ -18,8 +20,7 @@ classdef GeneralCollisionTensor < handle
     end
     
     methods
-
-        function obj = GeneralCollisionTensor(Basis, Kernel)
+        function obj = GeneralCollisionTensor(Basis, Kernel, K_test)
             obj.Basis = Basis;
             obj.Kernel = Kernel;
             
@@ -27,7 +28,14 @@ classdef GeneralCollisionTensor < handle
             obj.L_max = Basis.L_max;
             obj.D_max = 2 * obj.K_max + obj.L_max;
             
-            % Generate geometry maps (assuming this method exists in your class)
+            % Handle optional VMS test space bound
+            if nargin < 3 || isempty(K_test)
+                obj.K_test = obj.K_max;
+            else
+                obj.K_test = K_test;
+            end
+            
+            % Generate geometry maps
             obj.generate_geometry(); 
         end
        
@@ -39,10 +47,10 @@ classdef GeneralCollisionTensor < handle
             end
             obj.generate_R_tensor_imp();
         end
-
+        
         function generate_R_tensor_sumfac(obj, radial_pad, angular_pad)
-            if nargin < 2, radial_pad = 40; end
-            if nargin < 3, angular_pad = 0; end
+            if nargin < 2, radial_pad = 20; end
+            if nargin < 3, angular_pad = 20; end
             
             fprintf('Initializing Sum-Factorized 5D Quadrature Grids...\n');
             obj.R_tensor(:) = 0;
@@ -78,9 +86,12 @@ classdef GeneralCollisionTensor < handle
             eps_vec = (2*pi*(0:(N_eps-1))/N_eps)';
             W_eps = (2*pi/N_eps) * ones(N_eps, 1);
             
+            K_test_val = obj.K_test;
+            N_K_rad = max(N_K, K_test_val + 1); % Ensure array is large enough for both test and trial spaces
+            
             % Normalization Caches
-            RadialNorm = zeros(N_K, obj.L_max + 1);
-            for n_idx = 1:N_K
+            RadialNorm = zeros(N_K_rad, obj.L_max + 1);
+            for n_idx = 1:N_K_rad
                 k = n_idx - 1;
                 for l = 0:obj.L_max
                     al = l + 0.5;
@@ -173,12 +184,26 @@ classdef GeneralCollisionTensor < handle
                 qi_valid_mat(1:length(qi_list), t_chan) = qi_list;
             end
             
-            % CALL MEX (Remember to compile MEX with OpenMP)
-            obj.R_tensor = compute_rtensor_sumfac_mex(obj.K_max, N_L, N_Q, alpha_kernel, ...
-                x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
-                y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
-                RadialNorm, SH_Norm, L_triplets, qi_valid_mat, ...
-                P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2);
+            % Save to object
+            obj.L_triplets = L_triplets;
+            
+            % CALL MEX
+            if K_test_val > obj.K_max
+                % VMS Extended call (27 arguments)
+                obj.R_tensor = compute_rtensor_sumfac_mex(obj.K_max, N_L, N_Q, alpha_kernel, ...
+                    x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
+                    y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
+                    RadialNorm, SH_Norm, L_triplets, qi_valid_mat, ...
+                    P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2, ...
+                    K_test_val);
+            else
+                % Standard classical call (26 arguments)
+                obj.R_tensor = compute_rtensor_sumfac_mex(obj.K_max, N_L, N_Q, alpha_kernel, ...
+                    x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
+                    y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
+                    RadialNorm, SH_Norm, L_triplets, qi_valid_mat, ...
+                    P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2);
+            end
                 
             % Enforce Conservation (same as before)
             for t = 1:N_L
@@ -220,7 +245,7 @@ classdef GeneralCollisionTensor < handle
         end
         
         function extract_R_tensor(obj, M_sub, pivot_q, pivot_g, q_map, N_L, N_sub_q)
-            obj.R_tensor = zeros(obj.K_max+1, obj.K_max+1, obj.K_max+1, N_L);
+            obj.R_tensor = zeros(obj.K_test+1, obj.K_max+1, obj.K_max+1, N_L);
             
             for t = 1:N_L
                 q1 = pivot_q(t, 1);
@@ -232,7 +257,7 @@ classdef GeneralCollisionTensor < handle
                 sq2 = q_map(q2);
                 sq3 = q_map(q3);
                 
-                for k1 = 0:obj.K_max
+                for k1 = 0:obj.K_test
                     for k2 = 0:obj.K_max
                         for k3 = 0:obj.K_max
                             idx1 = k1 * N_sub_q + sq1;
@@ -282,9 +307,12 @@ classdef GeneralCollisionTensor < handle
         
         function C_assembled = assemble_full_tensor(obj)
             fprintf('Assembling FULL Tensor from R-Tensor and Gaunt Values...\n');
-            N_terms = obj.Basis.N_terms;
+            N_trial_terms = obj.Basis.N_terms;
             N_Q = obj.Basis.N_Q;
-            C_assembled = zeros(N_terms, N_terms, N_terms);
+            
+            % Account for asymmetric test space size
+            N_test_terms = (obj.K_test + 1) * N_Q;
+            C_assembled = zeros(N_test_terms, N_trial_terms, N_trial_terms);
             
             master_tic = tic;
             for g_idx = 1:length(obj.gaunt_vals)
@@ -296,13 +324,17 @@ classdef GeneralCollisionTensor < handle
                 
                 R_block = obj.R_tensor(:, :, :, t); 
                 
-                for k1 = 0:obj.K_max
+                % k1 loop bounds map to K_test
+                for k1 = 0:obj.K_test
                     for k2 = 0:obj.K_max
                         for k3 = 0:obj.K_max
                             idx1 = k1 * N_Q + q1;
                             idx2 = k2 * N_Q + q2;
                             idx3 = k3 * N_Q + q3;
-                            C_assembled(idx1, idx2, idx3) = R_block(k1+1, k2+1, k3+1) * g_val;
+                            
+                            % FIX: Accumulate instead of overwrite!
+                            C_assembled(idx1, idx2, idx3) = C_assembled(idx1, idx2, idx3) + ...
+                                                            R_block(k1+1, k2+1, k3+1) * g_val;
                         end
                     end
                 end
@@ -311,8 +343,33 @@ classdef GeneralCollisionTensor < handle
         end
       
     end
-
+    
     methods (Static)
+        function obj = loadobj(obj)
+            % LOADOBJ - Automatically called by MATLAB when loading from a .mat file.
+            % Use this to initialize new properties on legacy saved objects.
+            
+            if isempty(obj.K_test)
+                obj.K_test = obj.K_max;
+            end
+            
+            % Auto-populate L_triplets for legacy objects
+            if isempty(obj.L_triplets) && ~isempty(obj.ic_map) && ~isempty(obj.gaunt_labels)
+                N_L = max(obj.ic_map);
+                L_triplets_temp = zeros(N_L, 3);
+                q2l = @(q) floor(sqrt(double(q)-1));
+                
+                for t_chan = 1:N_L
+                    g_indices = find(obj.ic_map == t_chan);
+                    if ~isempty(g_indices)
+                        q_trip_first = obj.gaunt_labels(g_indices(1), :);
+                        L_triplets_temp(t_chan, :) = [q2l(q_trip_first(1)), q2l(q_trip_first(2)), q2l(q_trip_first(3))];
+                    end
+                end
+                obj.L_triplets = L_triplets_temp;
+            end
+        end
+        
         function [obj, Basis, Kernel] = load_precalc(K, L, omega)
             % Construct the standardized path
             dir_path = fullfile('src', 'precalc');
@@ -330,5 +387,4 @@ classdef GeneralCollisionTensor < handle
             end
         end
     end
-
 end
