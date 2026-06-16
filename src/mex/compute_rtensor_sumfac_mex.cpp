@@ -78,16 +78,22 @@ inline void eval_SH(double theta, double phi, int N_Q, const double* SH_Norm, do
 // MEX MAIN FUNCTION
 // ========================================================================
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
-    // Correct argument validation for the new MATLAB interface
-    if (nrhs != 26) {
-        mexErrMsgIdAndTxt("R_tensor:InvalidInput", "Exactly 26 inputs required.");
+    // 1. EXTRACT SCALAR DIMENSIONS (WITH BACKWARDS COMPATIBILITY)
+    if (nrhs != 26 && nrhs != 27) {
+        mexErrMsgIdAndTxt("R_tensor:InvalidInput", "Requires 26 or 27 inputs.");
     }
     
-    // 1. EXTRACT SCALAR DIMENSIONS
     int K_max = (int)mxGetScalar(prhs[0]); int N_K = K_max + 1;
     int N_L = (int)mxGetScalar(prhs[1]);
     int N_Q = (int)mxGetScalar(prhs[2]);
     double alpha = mxGetScalar(prhs[3]);
+    
+    // Safely assign K_test if provided, otherwise default to K_max
+    int K_test = K_max;
+    if (nrhs == 27) {
+        K_test = (int)mxGetScalar(prhs[26]);
+    }
+    int N_K_test = K_test + 1;
     
     // 2. EXTRACT GRIDS & WEIGHTS
     const double* x_nodes = mxGetPr(prhs[4]); const double* W_x = mxGetPr(prhs[5]); int N_x = mxGetNumberOfElements(prhs[4]);
@@ -102,7 +108,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     const double* eps_vec = mxGetPr(prhs[16]); const double* W_eps = mxGetPr(prhs[17]); int N_eps = mxGetNumberOfElements(prhs[16]);
     
     // 3. EXTRACT CACHES & GEOMETRY ARRAYS
-    const double* RadialNorm = mxGetPr(prhs[18]); // [N_K, L_max+1]
+    const double* RadialNorm = mxGetPr(prhs[18]); 
+    int N_K_rad = (int)mxGetM(prhs[18]); // Dynamically extract the memory stride to prevent segfaults
+    
     const double* SH_Norm = mxGetPr(prhs[19]);    // [N_Q]
     const double* L_triplets = mxGetPr(prhs[20]); // [N_L, 3]
     const double* qi_valid_mat = mxGetPr(prhs[21]); // [N_Q, N_L]
@@ -112,8 +120,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     const double* P_loss_p2 = mxGetPr(prhs[24]); // [N_y2, N_L]
     const double* P_gain_p2 = mxGetPr(prhs[25]); // [N_y2, N_Q, N_L]
 
-    // 4. ALLOCATE THE OUTPUT TENSOR
-    mwSize dims[4] = {(mwSize)N_K, (mwSize)N_K, (mwSize)N_K, (mwSize)N_L};
+    // 4. ALLOCATE THE OUTPUT TENSOR (Asymmetric block size)
+    mwSize dims[4] = {(mwSize)N_K_test, (mwSize)N_K, (mwSize)N_K, (mwSize)N_L};
     plhs[0] = mxCreateNumericArray(4, dims, mxDOUBLE_CLASS, mxREAL);
     double* R_tensor = mxGetPr(plhs[0]);
     
@@ -125,11 +133,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     // ====================================================================
     #pragma omp parallel
     {
-        // Thread-local accumulation buffers to prevent race conditions
-        std::vector<double> R_local(N_K * N_K * N_K * N_L, 0.0);
+        // Thread-local accumulation buffers sized for N_K_test
+        std::vector<double> R_local(N_K_test * N_K * N_K * N_L, 0.0);
         std::vector<double> Y_tmp1(N_Q, 0.0), Y_tmp2(N_Q, 0.0);
-        std::vector<double> Phi_loss1(N_K * N_L, 0.0), Phi_loss2(N_K * N_L, 0.0);
-        std::vector<double> Phi_gain1(N_K * N_L, 0.0), Phi_gain2(N_K * N_L, 0.0);
+        std::vector<double> Phi_loss1(N_K_test * N_L, 0.0), Phi_loss2(N_K_test * N_L, 0.0);
+        std::vector<double> Phi_gain1(N_K_test * N_L, 0.0), Phi_gain2(N_K_test * N_L, 0.0);
 
         #pragma omp for
         for (int i = 0; i < N_x; ++i) {
@@ -143,10 +151,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 double v_large = std::sqrt(x_i / 2.0) * (1.0 + u);
                 double v_small = std::sqrt(x_i / 2.0) * (1.0 - u);
                 
-                // Jacobian for u includes the radial polynomials' shared roots
                 double Jac_u = 0.5 * W_x[i] * W_u1[u_idx] * u * std::exp(-x_i * u * u) * (v_large * v_large * v_small * v_small);
                 
-                // Reset angular accumulators
                 std::fill(Phi_loss1.begin(), Phi_loss1.end(), 0.0); 
                 std::fill(Phi_loss2.begin(), Phi_loss2.end(), 0.0);
                 std::fill(Phi_gain1.begin(), Phi_gain1.end(), 0.0); 
@@ -167,10 +173,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                     for (int t_chan = 0; t_chan < N_L; ++t_chan) {
                         int l_1 = (int)L_triplets[t_chan + N_L * 0];
                         double loss_int = loss_weight * P_loss_p1[t_idx + N_t1 * (u_idx + N_u1 * t_chan)];
-                        for (int k1 = 0; k1 < N_K; ++k1) {
-                            double n_norm = RadialNorm[k1 + N_K * l_1];
-                            Phi_loss1[k1 + N_K * t_chan] += eval_radial(k1+1, l_1, v_large, n_norm) * loss_int;
-                            Phi_loss2[k1 + N_K * t_chan] += eval_radial(k1+1, l_1, v_small, n_norm) * loss_int;
+                        
+                        // Loss integration up to N_K_test
+                        for (int k1 = 0; k1 < N_K_test; ++k1) {
+                            double n_norm = RadialNorm[k1 + N_K_rad * l_1];
+                            Phi_loss1[k1 + N_K_test * t_chan] += eval_radial(k1+1, l_1, v_large, n_norm) * loss_int;
+                            Phi_loss2[k1 + N_K_test * t_chan] += eval_radial(k1+1, l_1, v_small, n_norm) * loss_int;
                         }
                     }
 
@@ -192,9 +200,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                         for (int e_idx = 0; e_idx < N_eps; ++e_idx) {
                             double c_eps = std::cos(eps_vec[e_idx]); 
                             double s_eps = std::sin(eps_vec[e_idx]);
-                            double u_px = s_chi * c_eps; 
-                            double u_py = s_chi * s_eps; 
-                            double u_pz = c_chi;
+                            double u_px = s_chi * c_eps; double u_py = s_chi * s_eps; double u_pz = c_chi;
                             
                             double up_x1 = u_px * z_scat_z1 + u_pz * z_scat_x1; 
                             double up_z1 = -u_px * z_scat_x1 + u_pz * z_scat_z1;
@@ -218,8 +224,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                                 
                                 for (int idx = 0; idx < N_Q; ++idx) {
                                     int q_i = (int)qi_valid_mat[idx + N_Q * t_chan];
-                                    if (q_i == -1) break; // End of valid indices
-                                    q_i -= 1; // 1-based MATLAB to 0-based C++
+                                    if (q_i == -1) break; 
+                                    q_i -= 1;
                                     
                                     double w_ang = P_gain_p1[t_idx + N_t1 * (u_idx + N_u1 * (q_i + N_Q * t_chan))];
                                     g_val1 += Y_tmp1[q_i] * w_ang; 
@@ -228,32 +234,34 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                                 double wg1 = g_val1 * gain_base * W_eps[e_idx];
                                 double wg2 = g_val2 * gain_base * W_eps[e_idx];
                                 
-                                for (int k1 = 0; k1 < N_K; ++k1) {
-                                    double n_norm = RadialNorm[k1 + N_K * l_1];
-                                    Phi_gain1[k1 + N_K * t_chan] += wg1 * eval_radial(k1+1, l_1, vp_mag1, n_norm);
-                                    Phi_gain2[k1 + N_K * t_chan] += wg2 * eval_radial(k1+1, l_1, vp_mag2, n_norm);
+                                // Gain integration up to N_K_test
+                                for (int k1 = 0; k1 < N_K_test; ++k1) {
+                                    double n_norm = RadialNorm[k1 + N_K_rad * l_1];
+                                    Phi_gain1[k1 + N_K_test * t_chan] += wg1 * eval_radial(k1+1, l_1, vp_mag1, n_norm);
+                                    Phi_gain2[k1 + N_K_test * t_chan] += wg2 * eval_radial(k1+1, l_1, vp_mag2, n_norm);
                                 }
                             }
                         }
                     }
                 } // End Inner t-loop
 
-                // Patch 1: Factorized Contraction (Executed outside t-loop)
+                // Patch 1: Factorized Contraction
                 for (int t_chan = 0; t_chan < N_L; ++t_chan) {
                     int l_2 = (int)L_triplets[t_chan + N_L * 1]; 
                     int l_3 = (int)L_triplets[t_chan + N_L * 2];
-                    for (int k1 = 0; k1 < N_K; ++k1) {
-                        double net1 = Jac_u * (Phi_gain1[k1 + N_K * t_chan] - Phi_loss1[k1 + N_K * t_chan]);
-                        double net2 = Jac_u * (Phi_gain2[k1 + N_K * t_chan] - Phi_loss2[k1 + N_K * t_chan]);
+                    
+                    for (int k1 = 0; k1 < N_K_test; ++k1) {
+                        double net1 = Jac_u * (Phi_gain1[k1 + N_K_test * t_chan] - Phi_loss1[k1 + N_K_test * t_chan]);
+                        double net2 = Jac_u * (Phi_gain2[k1 + N_K_test * t_chan] - Phi_loss2[k1 + N_K_test * t_chan]);
                         
                         for (int k2 = 0; k2 < N_K; ++k2) {
-                            double r2_l = eval_radial(k2+1, l_2, v_large, RadialNorm[k2 + N_K * l_2]);
-                            double r2_s = eval_radial(k2+1, l_2, v_small, RadialNorm[k2 + N_K * l_2]);
+                            double r2_l = eval_radial(k2+1, l_2, v_large, RadialNorm[k2 + N_K_rad * l_2]);
+                            double r2_s = eval_radial(k2+1, l_2, v_small, RadialNorm[k2 + N_K_rad * l_2]);
                             for (int k3 = 0; k3 < N_K; ++k3) {
-                                double r3_l = eval_radial(k3+1, l_3, v_large, RadialNorm[k3 + N_K * l_3]);
-                                double r3_s = eval_radial(k3+1, l_3, v_small, RadialNorm[k3 + N_K * l_3]);
+                                double r3_l = eval_radial(k3+1, l_3, v_large, RadialNorm[k3 + N_K_rad * l_3]);
+                                double r3_s = eval_radial(k3+1, l_3, v_small, RadialNorm[k3 + N_K_rad * l_3]);
                                 
-                                int out_idx = k1 + N_K * (k2 + N_K * (k3 + N_K * t_chan));
+                                int out_idx = k1 + N_K_test * (k2 + N_K * (k3 + N_K * t_chan));
                                 R_local[out_idx] += net1 * r2_l * r3_s + net2 * r2_s * r3_l;
                             }
                         }
@@ -283,7 +291,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                     double B_val = std::pow(u_mag * std::sqrt(2.0), alpha) / std::pow(x_i, alpha / 2.0);
                     double loss_weight = B_val * 2.0 * M_PI * 2.0 * Jac_t;
 
-                    // Reset angular accumulators INSIDE t-loop
                     std::fill(Phi_loss1.begin(), Phi_loss1.end(), 0.0); 
                     std::fill(Phi_loss2.begin(), Phi_loss2.end(), 0.0);
                     std::fill(Phi_gain1.begin(), Phi_gain1.end(), 0.0); 
@@ -292,10 +299,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                     for (int t_chan = 0; t_chan < N_L; ++t_chan) {
                         int l_1 = (int)L_triplets[t_chan + N_L * 0];
                         double loss_int = loss_weight * P_loss_p2[y_idx + N_y2 * t_chan];
-                        for (int k1 = 0; k1 < N_K; ++k1) {
-                            double n_norm = RadialNorm[k1 + N_K * l_1];
-                            Phi_loss1[k1 + N_K * t_chan] += eval_radial(k1+1, l_1, v_large, n_norm) * loss_int;
-                            Phi_loss2[k1 + N_K * t_chan] += eval_radial(k1+1, l_1, v_small, n_norm) * loss_int;
+                        for (int k1 = 0; k1 < N_K_test; ++k1) {
+                            double n_norm = RadialNorm[k1 + N_K_rad * l_1];
+                            Phi_loss1[k1 + N_K_test * t_chan] += eval_radial(k1+1, l_1, v_large, n_norm) * loss_int;
+                            Phi_loss2[k1 + N_K_test * t_chan] += eval_radial(k1+1, l_1, v_small, n_norm) * loss_int;
                         }
                     }
 
@@ -317,9 +324,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                         for (int e_idx = 0; e_idx < N_eps; ++e_idx) {
                             double c_eps = std::cos(eps_vec[e_idx]); 
                             double s_eps = std::sin(eps_vec[e_idx]);
-                            double u_px = s_chi * c_eps; 
-                            double u_py = s_chi * s_eps; 
-                            double u_pz = c_chi;
+                            double u_px = s_chi * c_eps; double u_py = s_chi * s_eps; double u_pz = c_chi;
                             
                             double up_x1 = u_px * z_scat_z1 + u_pz * z_scat_x1; 
                             double up_z1 = -u_px * z_scat_x1 + u_pz * z_scat_z1;
@@ -344,7 +349,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                                 for (int idx = 0; idx < N_Q; ++idx) {
                                     int q_i = (int)qi_valid_mat[idx + N_Q * t_chan];
                                     if (q_i == -1) break; 
-                                    q_i -= 1; // 1-based MATLAB to 0-based C++
+                                    q_i -= 1; 
                                     
                                     double w_ang = P_gain_p2[y_idx + N_y2 * (q_i + N_Q * t_chan)];
                                     g_val1 += Y_tmp1[q_i] * w_ang; 
@@ -353,31 +358,31 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                                 double wg1 = g_val1 * gain_base * W_eps[e_idx];
                                 double wg2 = g_val2 * gain_base * W_eps[e_idx];
                                 
-                                for (int k1 = 0; k1 < N_K; ++k1) {
-                                    double n_norm = RadialNorm[k1 + N_K * l_1];
-                                    Phi_gain1[k1 + N_K * t_chan] += wg1 * eval_radial(k1+1, l_1, vp_mag1, n_norm);
-                                    Phi_gain2[k1 + N_K * t_chan] += wg2 * eval_radial(k1+1, l_1, vp_mag2, n_norm);
+                                for (int k1 = 0; k1 < N_K_test; ++k1) {
+                                    double n_norm = RadialNorm[k1 + N_K_rad * l_1];
+                                    Phi_gain1[k1 + N_K_test * t_chan] += wg1 * eval_radial(k1+1, l_1, vp_mag1, n_norm);
+                                    Phi_gain2[k1 + N_K_test * t_chan] += wg2 * eval_radial(k1+1, l_1, vp_mag2, n_norm);
                                 }
                             }
                         }
                     }
-
-                    // Patch 2: Factorized Contraction (Executed INSIDE t-loop!)
+                    
+                    // Patch 2: Factorized Contraction
                     for (int t_chan = 0; t_chan < N_L; ++t_chan) {
                         int l_2 = (int)L_triplets[t_chan + N_L * 1]; 
                         int l_3 = (int)L_triplets[t_chan + N_L * 2];
-                        for (int k1 = 0; k1 < N_K; ++k1) {
-                            double net1 = Jac_y * (Phi_gain1[k1 + N_K * t_chan] - Phi_loss1[k1 + N_K * t_chan]);
-                            double net2 = Jac_y * (Phi_gain2[k1 + N_K * t_chan] - Phi_loss2[k1 + N_K * t_chan]);
+                        for (int k1 = 0; k1 < N_K_test; ++k1) {
+                            double net1 = Jac_y * (Phi_gain1[k1 + N_K_test * t_chan] - Phi_loss1[k1 + N_K_test * t_chan]);
+                            double net2 = Jac_y * (Phi_gain2[k1 + N_K_test * t_chan] - Phi_loss2[k1 + N_K_test * t_chan]);
                             
                             for (int k2 = 0; k2 < N_K; ++k2) {
-                                double r2_l = eval_radial(k2+1, l_2, v_large, RadialNorm[k2 + N_K * l_2]);
-                                double r2_s = eval_radial(k2+1, l_2, v_small, RadialNorm[k2 + N_K * l_2]);
+                                double r2_l = eval_radial(k2+1, l_2, v_large, RadialNorm[k2 + N_K_rad * l_2]);
+                                double r2_s = eval_radial(k2+1, l_2, v_small, RadialNorm[k2 + N_K_rad * l_2]);
                                 for (int k3 = 0; k3 < N_K; ++k3) {
-                                    double r3_l = eval_radial(k3+1, l_3, v_large, RadialNorm[k3 + N_K * l_3]);
-                                    double r3_s = eval_radial(k3+1, l_3, v_small, RadialNorm[k3 + N_K * l_3]);
+                                    double r3_l = eval_radial(k3+1, l_3, v_large, RadialNorm[k3 + N_K_rad * l_3]);
+                                    double r3_s = eval_radial(k3+1, l_3, v_small, RadialNorm[k3 + N_K_rad * l_3]);
                                     
-                                    int out_idx = k1 + N_K * (k2 + N_K * (k3 + N_K * t_chan));
+                                    int out_idx = k1 + N_K_test * (k2 + N_K * (k3 + N_K * t_chan));
                                     R_local[out_idx] += net1 * r2_l * r3_s + net2 * r2_s * r3_l;
                                 }
                             }
@@ -386,11 +391,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                 } // End Inner t-loop
             } // End Patch 2
         }
-
+        
         // Thread-safe reduction into global R_tensor
         #pragma omp critical
         {
-            for (int i = 0; i < N_K * N_K * N_K * N_L; ++i) {
+            for (int i = 0; i < N_K_test * N_K * N_K * N_L; ++i) {
                 R_tensor[i] += R_local[i];
             }
         }
