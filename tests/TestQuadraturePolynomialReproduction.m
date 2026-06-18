@@ -6,6 +6,9 @@ classdef TestQuadraturePolynomialReproduction < matlab.unittest.TestCase
         
         % 2. Quadrature types to test
         quad_type = {'legendre', 'lobatto'};
+        
+        % 3. Number of nodes for the Jacobi test
+        N_nodes = {5, 50};
     end
     
     methods (Test)
@@ -53,18 +56,18 @@ classdef TestQuadraturePolynomialReproduction < matlab.unittest.TestCase
             % Verifies exact integration of f(x) = x^(2m) against the 
             % physical Maxwellian weight x^2 e^(-beta x^2) on [0, inf).
             
-            beta = 1.25; % Use a non-trivial scaling parameter
+            beta_scale = 1.25; % Use a non-trivial scaling parameter
             N = 5;       % 5 points can exactly integrate up to m=9
             
             % Generate half-range Hermite quadrature rule
-            qr = Gauss.halfrange_hermite(N, beta);
+            qr = Gauss.halfrange_hermite(N, beta_scale);
             x = qr.x; w = qr.w;
             
             % Define target function f(x) = x^(2m)
             f_eval = x.^(2 * m_degree);
             
             % Exact analytical integral of x^(2m + 2) * e^(-beta * x^2)
-            exact_val = gamma(m_degree + 1.5) / (2 * beta^(m_degree + 1.5));
+            exact_val = gamma(m_degree + 1.5) / (2 * beta_scale^(m_degree + 1.5));
             
             % Approximated integral
             I_quad = dot(w, f_eval);
@@ -73,11 +76,51 @@ classdef TestQuadraturePolynomialReproduction < matlab.unittest.TestCase
             err = abs(exact_val - I_quad);
             
             % Assertion
-            % We use 1e-12 as Hermite rules can occasionally exhibit slightly
-            % more floating point drift than compact Legendre rules.
             testCase.verifyLessThan(err, 1e-12, ...
                 sprintf('Failed half-range Hermite x^(%d) with beta=%.2f', ...
-                        2*m_degree, beta));
+                        2*m_degree, beta_scale));
+        end
+        
+        function testJacobiReproductionAndStability(testCase, m_degree, N_nodes)
+            % TESTJACOBIREPRODUCTIONANDSTABILITY
+            % Verifies exact integration of f(x) = x^m against the Jacobi
+            % weight (1-x)^alpha * (1+x)^beta on [-1, 1], and ensures the
+            % Golub-Welsch eigenvalue solver remains stable and highly accurate
+            % (error < 1e-12) even at high node counts.
+            
+            alpha_val = 1.5;
+            beta_val  = 0.5;
+            a = -1; b = 1;
+            
+            qr = Gauss.jacobi(N_nodes, alpha_val, beta_val, a, b);
+            x = qr.x; w = qr.w;
+            
+            % 1. Verify structural integrity of the arrays (NaN/Inf checks)
+            testCase.verifyFalse(any(isnan(x)), sprintf('NaN found in nodes at N=%d', N_nodes));
+            testCase.verifyFalse(any(isnan(w)), sprintf('NaN found in weights at N=%d', N_nodes));
+            testCase.verifyFalse(any(isinf(w)), sprintf('Inf found in weights at N=%d', N_nodes));
+            
+            % 2. Exact analytical integral using binomial expansion and the Beta function:
+            % int_{-1}^1 x^m (1-x)^a (1+x)^b dx
+            exact_val = 0;
+            for k = 0:m_degree
+                % built-in beta(z, w) computes the Beta function
+                beta_term = beta(beta_val + k + 1, alpha_val + 1);
+                term = nchoosek(m_degree, k) * 2^k * (-1)^(m_degree - k) * beta_term;
+                exact_val = exact_val + term;
+            end
+            exact_val = exact_val * 2^(alpha_val + beta_val + 1);
+            
+            % 3. Approximated integral
+            f_eval = x.^m_degree;
+            I_quad = dot(w, f_eval);
+            
+            err = abs(exact_val - I_quad);
+            
+            % 4. Assert strict 1e-12 tolerance
+            testCase.verifyLessThan(err, 1e-12, ...
+                sprintf('Failed Jacobi reproduction for x^%d with alpha=%.1f, beta=%.1f at N=%d (err: %e)', ...
+                        m_degree, alpha_val, beta_val, N_nodes, err));
         end
         
     end

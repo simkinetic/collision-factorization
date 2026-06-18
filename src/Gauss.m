@@ -104,6 +104,70 @@ classdef Gauss
             end
         end
 
+        function qr = jacobi(N, alpha, beta, a, b)
+            % JACOBI Returns Gauss-Jacobi nodes and weights.
+            % Computes nodes and weights for the integral:
+            % \int_{-1}^1 f(x) (1-x)^\alpha (1+x)^\beta dx
+            %
+            % Uses the Golub-Welsch Algorithm via the Jacobi Matrix.
+            % If 'a' and 'b' are provided, the nodes are mapped to [a,b]
+            % and the weights are scaled by the differential (b-a)/2.
+            
+            if nargin < 4 || isempty(a), a = -1; end
+            if nargin < 5 || isempty(b), b = 1; end
+            
+            if N == 0
+                qr.x = []; qr.w = []; return;
+            end
+            
+            if N == 1
+                qr.x = (beta - alpha) / (alpha + beta + 2);
+                qr.w = 2^(alpha + beta + 1) * exp(gammaln(alpha + 1) + gammaln(beta + 1) - gammaln(alpha + beta + 2));
+            else
+                ab = alpha + beta;
+                
+                % Diagonal elements (a_j)
+                j = (0:N-1)';
+                a_diag = zeros(N, 1);
+                a_diag(1) = (beta - alpha) / (ab + 2);
+                if N > 1
+                    j_sub = 1:N-1;
+                    denom = (2*j_sub + ab) .* (2*j_sub + ab + 2);
+                    a_diag(2:end) = (beta^2 - alpha^2) ./ denom;
+                end
+                
+                % Sub-diagonal elements (b_j)
+                b_subdiag = zeros(N-1, 1);
+                b_subdiag(1) = sqrt( 4 * (alpha + 1) * (beta + 1) / ((ab + 2)^2 * (ab + 3)) );
+                if N > 2
+                    j_s = (2:N-1)';
+                    num = 4 * j_s .* (j_s + alpha) .* (j_s + beta) .* (j_s + ab);
+                    den = (2*j_s + ab - 1) .* ((2*j_s + ab).^2) .* (2*j_s + ab + 1);
+                    b_subdiag(2:end) = sqrt(num ./ den);
+                end
+                
+                % Construct symmetric tridiagonal Jacobi matrix
+                J = diag(a_diag) + diag(b_subdiag, 1) + diag(b_subdiag, -1);
+                
+                % Compute eigenvalues and eigenvectors
+                [V, D] = eig(J, 'vector');
+                [x, idx] = sort(D);
+                V = V(:, idx);
+                
+                qr.x = x;
+                
+                % Compute weights from the first component of normalized eigenvectors
+                mu_0 = 2^(ab + 1) * exp(gammaln(alpha + 1) + gammaln(beta + 1) - gammaln(ab + 2));
+                qr.w = mu_0 .* (V(1, :)').^2;
+            end
+            
+            % Affine mapping to [a, b]
+            if a ~= -1 || b ~= 1
+                qr.x = a + (b - a) * (qr.x + 1) / 2;
+                qr.w = qr.w * (b - a) / 2;
+            end
+        end
+
         function qr = generalized_laguerre_2(N, alpha)
             % GENLAGUERRE Returns Generalized Gauss-Laguerre nodes and weights
             % Weight: x^alpha * e^-x on [0, inf)
@@ -171,8 +235,6 @@ classdef Gauss
             qr.x = x;
             qr.w = w;
         end
-
-
 
         function qr = halfrange_hermite(N, beta)
             % HALFRANGE_HERMITE Nodes and weights for Half-Range Hermite integration.
