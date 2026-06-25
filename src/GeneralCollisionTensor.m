@@ -69,9 +69,10 @@ classdef GeneralCollisionTensor < handle
             obj.generate_R_tensor_imp();
         end
         
-        function generate_R_tensor_sumfac(obj, radial_pad, angular_pad)
-            if nargin < 2, radial_pad = 20; end
-            if nargin < 3, angular_pad = 20; end
+        function generate_R_tensor_sumfac(obj, radial_pad, angular_pad, internal_pad)
+            if nargin < 2, radial_pad = 10; end
+            if nargin < 3, angular_pad = 10; end
+            if nargin < 4, internal_pad = 10; end
             
             fprintf('Initializing Sum-Factorized 9D Polyatomic Quadrature Grids...\n');
             obj.R_tensor(:) = 0;
@@ -92,11 +93,11 @@ classdef GeneralCollisionTensor < handle
             N_eps = 2 * obj.K_max + obj.L_max + 1;
             
             % 2. EXACT INTERNAL GRID SIZING (from Table 1)
-            N_I_nodes = obj.I_max + 1; 
-            N_J_nodes = obj.I_max + 1;
-            N_r_nodes = obj.I_max + 1;
-            N_R_nodes = ceil((obj.K_max + 2 * obj.I_max + 1) / 2.0);
-            
+            N_I_nodes = ceil((obj.K_max + 2 * obj.I_max + 1) / 2.0) + internal_pad; 
+            N_J_nodes = ceil((obj.K_max + 2 * obj.I_max + 1) / 2.0) + internal_pad;
+            N_r_nodes = obj.I_max + 1 + internal_pad;
+            N_R_nodes = ceil((obj.K_max + 2 * obj.I_max + 1) / 2.0) + internal_pad;
+
             % Spatial 1D Grids
             qr_x = Gauss.generalized_laguerre(N_x, alpha_kernel / 2.0);
             x_nodes = qr_x.x; W_x = qr_x.w;
@@ -238,7 +239,7 @@ classdef GeneralCollisionTensor < handle
             obj.L_triplets = L_triplets;
             
             % NEW: Call Polyatomic MEX (Requires passing all 4 new grids + nu + InternalNorm)
-            obj.R_tensor = compute_rtensor_polyatomic_mex(obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
+            obj.R_tensor = compute_rtensor_polyatomic_sumfac_mex(obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
                 x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
                 y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
                 I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, ...
@@ -311,15 +312,19 @@ classdef GeneralCollisionTensor < handle
                 
                 R_block = obj.R_tensor(:, :, :, :, :, :, t); 
                 
-                for k1 = 0:obj.K_test
-                    for i1 = 0:obj.I_test
-                        idx1 = (k1 * N_I_test + i1) * N_Q + q1;
+                % Inverted loop order: Trailing dimensions (k3, i3) on the outside,
+                % leading dimensions (k1, i1) on the inside for column-major efficiency.
+                for k3 = 0:obj.K_max
+                    for i3 = 0:obj.I_max
+                        idx3 = (k3 * N_I_trial + i3) * N_Q + q3;
+                        
                         for k2 = 0:obj.K_max
                             for i2 = 0:obj.I_max
                                 idx2 = (k2 * N_I_trial + i2) * N_Q + q2;
-                                for k3 = 0:obj.K_max
-                                    for i3 = 0:obj.I_max
-                                        idx3 = (k3 * N_I_trial + i3) * N_Q + q3;
+                                
+                                for k1 = 0:obj.K_test
+                                    for i1 = 0:obj.I_test
+                                        idx1 = (k1 * N_I_test + i1) * N_Q + q1;
                                         
                                         C_assembled(idx1, idx2, idx3) = C_assembled(idx1, idx2, idx3) + ...
                                             R_block(k1+1, k2+1, k3+1, i1+1, i2+1, i3+1) * g_val;

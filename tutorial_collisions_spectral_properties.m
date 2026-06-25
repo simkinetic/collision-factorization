@@ -31,7 +31,7 @@ gamma = 0.0;
 % Initialize using the new API
 Kernel = ScatteringKernel(gamma);
 TensorObj = GeneralCollisionTensor(Basis, Kernel);
-TensorObj.generate_R_tensor_sumfac(16, 16); % High-precision padding
+TensorObj.generate_R_tensor_sumfac(10, 10, 10); % High-precision padding
 C_assembled = TensorObj.assemble_full_tensor();
 C_flat = reshape(C_assembled, N_terms, N_terms^2);
 
