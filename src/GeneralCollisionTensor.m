@@ -22,6 +22,14 @@ classdef GeneralCollisionTensor < handle
         Kernel         % ScatteringKernel object
         
         use_mex        % Boolean flag to toggle C++ MEX execution
+
+        % Spectral extended-model (eq 43) path. When true and the kernel is DSMC with
+        % nonzero eta_hat/eta_hat_f, the singular factor (I/E)^zhat (E=1/2|u|^2+I+J) is
+        % resolved by the auxiliary Laplace s-integral E^{-zhat}=1/Gamma(zhat) int s^{zhat-1}
+        % e^{-sE} ds (compute_rtensor_polyatomic_aux_mex), restoring spectral convergence.
+        % false -> legacy pointwise (algebraic) extended build via the base MEX.
+        laplace_extended = false;
+        laplace_Ns = 32;          % Gauss-Jacobi s-node count for the Laplace integral
     end
     
     methods
@@ -259,6 +267,51 @@ classdef GeneralCollisionTensor < handle
             
             obj.L_triplets = L_triplets;
 
+            % ---- Spectral extended-model build via the auxiliary Laplace s-integral ----
+            % Resolves the singular factor (I/E)^zhat (E = 1/2|u|^2 + I + J) by
+            %   E^{-zhat} = 1/Gamma(zhat) int_0^inf s^{zhat-1} e^{-sE} ds .
+            % Per s-node: the velocity part e^{-s|u|^2/2} is carried by the aux MEX
+            % (s_laplace); the internal Laguerre nodes are shifted (nu->nu+zhat, holding
+            % I^zhat) and scaled (sigma = 1/(1+s)); the (r(1-R))^zhat post weighting
+            % (non-frozen) folds into the r/R weights. See laplace_correction.
+            if obj.laplace_extended && is_dsmc
+                aux_mex = @(km, In, WIn, Jn, WJn, rn, Wrn, Rn, WRn, s_lap) ...
+                    compute_rtensor_polyatomic_aux_mex( ...
+                        obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
+                        x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
+                        y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
+                        In, WIn, Jn, WJn, rn, Wrn, Rn, WRn, ...
+                        RadialNorm, InternalNorm, SH_Norm, L_triplets, qi_valid_mat, ...
+                        P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2, ...
+                        K_test_val, I_test_val, km, 0.0, 0.0, 0.0, 0.0, s_lap);
+
+                w = obj.Kernel.omega;
+                R_nf = []; R_fr = [];
+                if w > 0
+                    R_nf = aux_mex(1, I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, 0.0);
+                    if eta_hat ~= 0.0
+                        R_nf = R_nf + eta_hat * obj.laplace_correction(aux_mex, 1, ...
+                            zeta_hat/2.0, nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                    end
+                end
+                if w < 1
+                    R_fr = aux_mex(2, I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, 0.0);
+                    if eta_hat_f ~= 0.0
+                        R_fr = R_fr + eta_hat_f * obj.laplace_correction(aux_mex, 2, ...
+                            zeta_hat_f, nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                    end
+                end
+                if w == 0
+                    obj.R_tensor = obj.Kernel.C_vhs_frozen * R_fr;
+                elseif w == 1
+                    obj.R_tensor = obj.Kernel.C_vhs * R_nf;
+                else
+                    obj.R_tensor = w * obj.Kernel.C_vhs * R_nf + ...
+                                   (1 - w) * obj.Kernel.C_vhs_frozen * R_fr;
+                end
+                return;
+            end
+
             % Call the Polyatomic MEX. The trailing argument selects the kernel:
             %   0 = legacy polyatomic additive Grad kernel
             %   1 = DSMC non-frozen channel  B^nf = (sqrt2 u)^zeta, R^(zeta/2) in W_R
@@ -297,7 +350,56 @@ classdef GeneralCollisionTensor < handle
             % Enforce Conservation
             % (Update conservation logic for polyatomic cases as needed)
         end
-        
+
+        function Rc = laplace_correction(obj, aux_mex, km, zhat, nu_val, ...
+                                         N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R)
+            % LAPLACE_CORRECTION  eta-coefficient correction tensor for the extended model.
+            % Returns the (I/E)^zhat + (J/E)^zhat weighted operator (eq 43 bracket, sans the
+            % eta prefactor) built spectrally via the auxiliary Laplace s-integral:
+            %   J_corr = 1/Gamma(zhat) int_0^inf s^{zhat-1} [ aux operator with e^{-sE} ] ds .
+            % Substituting t = s/(1+s) in [0,1] gives a Gauss-Jacobi(2nu+1, zhat-1) rule; the
+            % internal Laguerre nodes are scaled by sigma = 1-t = 1/(1+s) (the e^{-sI},e^{-sJ}),
+            % the I^zhat (resp. J^zhat) endpoint is held by a shifted GL(nu+zhat) rule, and the
+            % velocity e^{-s|u|^2/2} is applied inside the MEX (s_lap). Internal weights are NOT
+            % rescaled by sigma-powers -- those are absorbed by the (1-t)^{2nu+1} Jacobi weight.
+            % For the non-frozen channel (km==1) the post (r(1-R))^zhat / ((1-r)(1-R))^zhat
+            % weighting folds into the passed r/R weights. I- and J-channels are both summed.
+            Ns = obj.laplace_Ns;
+
+            % s-grid: Gauss-Jacobi(2nu+1, zhat-1) on [0,1]; renormalize weights to the true
+            % Beta moment B(zhat, 2nu+2) (Gauss.jacobi carries a spurious 2^{alpha+beta} factor).
+            qj = Gauss.jacobi(Ns, 2*nu_val + 1, zhat - 1, 0, 1);
+            tk = qj.x; wtk = qj.w;
+            Bmom = exp(gammaln(zhat) + gammaln(2*nu_val + 2) - gammaln(zhat + 2*nu_val + 2));
+            wtk = wtk * (Bmom / sum(wtk));
+
+            % Internal base rules: shifted GL(nu+zhat) holds the ^zhat power; GL(nu) is partner.
+            qS = Gauss.generalized_laguerre(N_I_nodes, nu_val + zhat); tS = qS.x; wS = qS.w;
+            qP = Gauss.generalized_laguerre(N_J_nodes, nu_val);        tP = qP.x; wP = qP.w;
+
+            is_nf = (km == 1);
+            if is_nf
+                WR_eta = W_R .* (1 - R_nodes).^zhat;     % (1-R)^zhat  (both channels)
+                Wr_t1  = W_r .* (r_nodes).^zhat;         % r^zhat      (I-channel)
+                Wr_t2  = W_r .* (1 - r_nodes).^zhat;     % (1-r)^zhat  (J-channel)
+            end
+
+            Rc = 0;
+            for k = 1:Ns
+                t = tk(k); s = t / (1 - t); sig = 1 - t;     % sigma = 1/(1+s)
+                In_S = tS * sig;  In_P = tP * sig;           % scale nodes; weights unscaled
+                if is_nf
+                    Rc_I = aux_mex(km, In_S, wS, In_P, wP, r_nodes, Wr_t1, R_nodes, WR_eta, s);
+                    Rc_J = aux_mex(km, In_P, wP, In_S, wS, r_nodes, Wr_t2, R_nodes, WR_eta, s);
+                else
+                    Rc_I = aux_mex(km, In_S, wS, In_P, wP, r_nodes, W_r, R_nodes, W_R, s);
+                    Rc_J = aux_mex(km, In_P, wP, In_S, wS, r_nodes, W_r, R_nodes, W_R, s);
+                end
+                Rc = Rc + wtk(k) * (Rc_I + Rc_J);
+            end
+            Rc = Rc / gamma(zhat);
+        end
+
         %% --- 2. PIVOT EXTRACTION HELPERS ---
         % (Setup pivots remains identical)
         
