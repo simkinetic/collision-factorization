@@ -32,10 +32,12 @@ K_max = 2; L_max = 2; I_max = 2;
 pad = [16 16 8];     % [radial tangential internal]; E2 plateau
 
 % name, delta, zeta, Pr_meas, numu_meas, [Table-4: omega, eta_hat, zeta_hat, eta_hat_f, zeta_hat_f]
+% zeta = 2(1-s_visc) from Djordjic et al. Table 1 (N2 s_visc=0.733 -> 0.534; CO 0.735 -> 0.530;
+% H2 0.696 -> 0.608). Table-4 (omega,eta_hat,zeta_hat,eta_hat_f,zeta_hat_f) verified vs the PDF.
 gases = {
-  'N2', 2.01, 0.533, 0.717, 0.73, 0.312052, -0.3,   0.965, -0.207793, 0.3
+  'N2', 2.01, 0.534, 0.717, 0.73, 0.312052, -0.3,   0.965, -0.207793, 0.3
   'CO', 2.01, 0.530, 0.743, 0.55, 0.540506, -0.453, 0.965,  0.570111, 0.965
-  'H2', 1.94, 0.607, 0.686, 30.0, 0.0101187,-0.453, 0.965, -0.133879, 0.965
+  'H2', 1.94, 0.608, 0.686, 30.0, 0.0101187,-0.453, 0.965, -0.133879, 0.965
 };
 
 fprintf('\n=== Extended model (eq 43): experimental Pr and nu/mu ===\n');
