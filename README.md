@@ -93,6 +93,72 @@ These scripts quantify the algorithmic performance of the factorization:
 
 ---
 
+## DSMC Polyatomic Collision Kernel (Djordjić et al. 2023)
+
+The `ScatteringKernel` class supports the variable-hard-sphere Borgnakke–Larsen (VHS–BL)
+collision-kernel model used by the DSMC community
+([Djordjić, Oblapenko, Pavić-Čolić & Torrilhon, *Continuum Mech. Thermodyn.* **35** (2023) 103–119](https://doi.org/10.1007/s00161-022-01167-8)),
+both the base DSMC model (eq. 54) and its internal-energy-modulated **extended** model (eq. 43).
+
+### Construction
+
+```matlab
+% Base DSMC convex-split kernel: B = |u|^zeta [ omega*K_delta*R^(zeta/2)
+%                                             + (1-omega)*delta(r-r')delta(R-R')*e_tr^(zeta/2) ]
+K = ScatteringKernel('DSMC', struct('zeta', 0.533, 'delta', 2.01, 'omega', 0.3));
+%   zeta  = 2*(1 - s_visc)   relative-speed exponent (or pass 's_visc' instead)
+%   delta = internal DOF     (nu = delta/2 - 1 is the internal-Laguerre parameter)
+%   omega = p_int in [0,1]   inelastic (non-frozen) collision probability
+
+% Extended model (eq. 43): add internal-energy modulation. Defaults are 0 -> base DSMC.
+K = ScatteringKernel('DSMC', struct('zeta',0.53,'delta',2.01,'omega',0.54, ...
+        'eta_hat',-0.453, 'zeta_hat',0.965, ...     % non-frozen factor 1 + eta_hat(...)^(zeta_hat/2)
+        'eta_hat_f',0.570, 'zeta_hat_f',0.965));     % frozen     factor 1 + eta_hat_f(i^zeta_hat_f + ...)
+%   eta_hat, eta_hat_f >= -1/2  (kernel positivity);  zeta_hat, zeta_hat_f >= 0
+```
+
+The kernel is then assembled exactly as any other model:
+
+```matlab
+Basis = SpectralBasis(K_max, L_max, I_max, K.nu);
+T = GeneralCollisionTensor(Basis, K);
+T.generate_R_tensor_sumfac(radial_pad, tangential_pad, internal_pad);  % padding beyond exactness
+C = T.assemble_full_tensor();
+```
+
+The frozen and non-frozen channels are computed by `compute_rtensor_polyatomic_sumfac_mex`
+(`kernel_model = 1` non-frozen, `2` frozen) and blended in `GeneralCollisionTensor` as
+`omega*C_vhs*R_nf + (1-omega)*C_vhs_frozen*R_fr`. Recompile that MEX after pulling these
+changes (same `mex -R2018a … -fopenmp` recipe as above).
+
+### Implementation notes
+
+* **Frozen channel.** Elastic (`I'=I`, `I*'=I*`, `|u'|=|u|`), integrated directly in
+  internal-energy space; basis orthonormality carries the Kronecker structure. There is *no*
+  `(R,r)`-partition measure in this channel (a common pitfall — adding the Borgnakke–Larsen
+  `H_delta` weight double-counts a `nu`-dependent factor and corrupts the internal-heat-flux
+  rate).
+* **Extended model.** The non-frozen `(r(1-R))^(zeta_hat/2)` weight separates across the
+  sum-factorization cascade; the `(I/E)^(zeta_hat/2)` factors are per-quadrature-point scalars.
+  Gain and loss share an identical weighting, so conservation (`#null = 5`) is preserved.
+  Because of the non-integer internal exponents the extended channels converge *algebraically*
+  (padding-controlled), unlike the spectral base channels.
+
+### DSMC validation / transport benchmarks
+
+* `benchmark_dsmc_transport.m`: base DSMC model. Builds the operator for the calorically-perfect
+  gases of Table 1 (N₂/O₂/NO/CO/H₂), extracts the shear/bulk/heat-flux production terms, and
+  reports the Prandtl number (eq. 39), the bulk/shear ratio ν/μ (eq. 58), and the reachable Pr
+  window over ω ∈ [0,1] against the Eucken/frozen/measured values (Tables 2–3).
+* `benchmark_dsmc_extended.m`: extended model. Reports Pr and ν/μ at the paper's Table-4 fit
+  parameters, then **re-fits** (ω, η̂_f, and ζ̂_f if needed) so that the experimental Prandtl
+  number and bulk/shear ratio are reached *simultaneously* in this operator.
+* `paper/make_figures.m`: regenerates the validation figures (frozen-Pr accuracy vs.
+  Monte-Carlo, convergence, transport reachability) into `paper/figures/`.
+* `paper/main.tex`: the accompanying report (theory, methods, validation tables and figures).
+
+---
+
 ## Running the Unit Tests
 
 To verify that the environment is configured correctly and the underlying mathematical libraries (e.g., spherical harmonics, basis exactness) are functioning as intended, run the master test script from the root directory:

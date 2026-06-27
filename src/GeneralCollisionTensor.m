@@ -82,6 +82,27 @@ classdef GeneralCollisionTensor < handle
             N_Q = obj.Basis.N_Q;
             alpha_kernel = obj.Kernel.alpha;
             nu_val = obj.nu;
+
+            % DSMC convex-split kernel (Djordjic et al. 2023): the non-frozen
+            % channel is B^nf = K_delta*|u|^zeta*R^(zeta/2). The R^(zeta/2) folds
+            % into the kinetic-partition Jacobi weight; the |u|^zeta is handled by
+            % the existing alpha-keyed energy quadrature (alpha = zeta). The
+            % additive internal kernel term of the legacy 'Polyatomic' model is
+            % dropped via kernel_model = 1.
+            is_dsmc = strcmpi(obj.Kernel.model_type, 'DSMC');
+            if is_dsmc
+                kernel_model = 1;
+                R_beta = 0.5 + obj.Kernel.zeta / 2.0;   % R^(1/2) * R^(zeta/2)
+                % Extended-model (eq 43) internal-energy modulation params.
+                eta_hat    = obj.Kernel.eta_hat;
+                zeta_hat   = obj.Kernel.zeta_hat;
+                eta_hat_f  = obj.Kernel.eta_hat_f;
+                zeta_hat_f = obj.Kernel.zeta_hat_f;
+            else
+                kernel_model = 0;
+                R_beta = 0.5;
+                eta_hat = 0.0; zeta_hat = 0.0; eta_hat_f = 0.0; zeta_hat_f = 0.0;
+            end
             
             % 1. EXACT SPATIAL GRID SIZING (with padding)
             N_x = radial_pad + ceil((3 * obj.K_max + 1.5 * obj.L_max + 3) / 2.0);
@@ -123,7 +144,7 @@ classdef GeneralCollisionTensor < handle
             qr_r = Gauss.jacobi(N_r_nodes, nu_val, nu_val, 0, 1);
             r_nodes = qr_r.x; W_r = qr_r.w;
             
-            qr_R = Gauss.jacobi(N_R_nodes, 2*nu_val + 1, 0.5, 0, 1);
+            qr_R = Gauss.jacobi(N_R_nodes, 2*nu_val + 1, R_beta, 0, 1);
             R_nodes = qr_R.x; W_R = qr_R.w;
             
             K_test_val = obj.K_test;
@@ -237,16 +258,42 @@ classdef GeneralCollisionTensor < handle
             end
             
             obj.L_triplets = L_triplets;
-            
-            % NEW: Call Polyatomic MEX (Requires passing all 4 new grids + nu + InternalNorm)
-            obj.R_tensor = compute_rtensor_polyatomic_sumfac_mex(obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
+
+            % Call the Polyatomic MEX. The trailing argument selects the kernel:
+            %   0 = legacy polyatomic additive Grad kernel
+            %   1 = DSMC non-frozen channel  B^nf = (sqrt2 u)^zeta, R^(zeta/2) in W_R
+            %   2 = DSMC frozen (elastic) channel B^f = (sqrt2 u)^zeta, I'=I, J'=J
+            % The four trailing args carry the extended-model (eq 43) modulation:
+            % non-frozen uses (eta_hat, zeta_hat); frozen uses (eta_hat_f, zeta_hat_f).
+            call_mex = @(km) compute_rtensor_polyatomic_sumfac_mex( ...
+                obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
                 x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
                 y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
                 I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, ...
                 RadialNorm, InternalNorm, SH_Norm, L_triplets, qi_valid_mat, ...
                 P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2, ...
-                K_test_val, I_test_val);
-                
+                K_test_val, I_test_val, km, ...
+                eta_hat, zeta_hat, eta_hat_f, zeta_hat_f);
+
+            if is_dsmc
+                % Convex split: R_total = omega*C_vhs*R_nonfrozen + (1-omega)*C_vhs_frozen*R_frozen.
+                % Skip the channel with zero weight at the omega endpoints (the non-frozen
+                % channel is the expensive 9D one), which halves endpoint builds.
+                w = obj.Kernel.omega;
+                if w == 0
+                    obj.R_tensor = obj.Kernel.C_vhs_frozen * call_mex(2);
+                elseif w == 1
+                    obj.R_tensor = obj.Kernel.C_vhs * call_mex(1);
+                else
+                    R_nf = call_mex(1);
+                    R_fr = call_mex(2);
+                    obj.R_tensor = w * obj.Kernel.C_vhs * R_nf + ...
+                                   (1 - w) * obj.Kernel.C_vhs_frozen * R_fr;
+                end
+            else
+                obj.R_tensor = call_mex(kernel_model);
+            end
+
             % Enforce Conservation
             % (Update conservation logic for polyatomic cases as needed)
         end

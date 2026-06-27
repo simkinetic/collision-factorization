@@ -102,7 +102,12 @@ inline void eval_SH_fast(double x, double cphi, double sphi, int N_Q, const doub
 
 struct Config {
     int K_max, I_max, N_K, N_I, K_test, I_test, N_K_test, N_I_test, N_K_rad, N_I_rad, N_L, N_Q, L_max;
+    int kernel_model;   // 0 = legacy polyatomic (additive internal term); 1 = DSMC non-frozen (|u|^zeta only)
     double alpha, nu;
+    // Extended-model (eq 43) internal-energy modulation. eta_hat/zeta_hat act on the
+    // non-frozen channel (kernel_model==1); eta_hat_f/zeta_hat_f on the frozen one (==2).
+    // All zero -> base DSMC (eq 54) kernel.
+    double eta_hat, zeta_hat, eta_hat_f, zeta_hat_f;
     
     const double *x_nodes, *W_x; int N_x;
     const double *u1_nodes, *W_u1; int N_u1;
@@ -123,6 +128,11 @@ struct Config {
     const std::vector<double>* c_eps;
     const std::vector<double>* s_eps;
     double sum_WR, sum_Wr;
+    // Extended-model eta_hat weight is separable: (r(1-R))^{zeta_hat/2} = (1-R)^{zeta_hat/2} r^{zeta_hat/2}.
+    // Precompute the 1-D moments so the integrated loss kernel is cheap.
+    double sum_WR_eta;    // Sum_R W_R (1-R)^{zeta_hat/2}
+    double sum_Wr_eta1;   // Sum_r W_r r^{zeta_hat/2}
+    double sum_Wr_eta2;   // Sum_r W_r (1-r)^{zeta_hat/2}
 };
 
 struct ThreadScratch {
@@ -130,6 +140,10 @@ struct ThreadScratch {
     std::vector<double> Y_tmp1, Y_tmp2, Rad_large, Rad_small, rad_vpmag1, rad_vpmag2;
     std::vector<double> H_I_test, H_J_test, H_I_trial, H_J_trial, H_Ip, H_Jp;
     std::vector<double> Phi_loss1, Phi_loss2, N_gain1, N_gain2, S_gain1, S_gain2, M_gain_I, M_gain_J, net1, net2;
+    // Extended-model eta_hat branch (non-frozen): per-R r-integrals of the post-internal
+    // basis weighted by r^{zeta_hat/2} (suffix _t1) and (1-r)^{zeta_hat/2} (suffix _t2),
+    // for the I-channel (post I'=r(1-R)E -> H_Ip) and J-channel (post J'=(1-r)(1-R)E -> H_Jp).
+    std::vector<double> Mr_I_t1, Mr_I_t2, Mr_J_t1, Mr_J_t2;
 
     ThreadScratch(const Config& cfg) {
         R_local.assign(cfg.N_K_test * cfg.N_K * cfg.N_K * cfg.N_I_test * cfg.N_I * cfg.N_I * cfg.N_L, 0.0);
@@ -145,7 +159,9 @@ struct ThreadScratch {
         H_Ip.assign(cfg.N_I_rad, 0.0); H_Jp.assign(cfg.N_I_rad, 0.0);
         
         M_gain_I.assign(cfg.N_I_test, 0.0); M_gain_J.assign(cfg.N_I_test, 0.0);
-        
+        Mr_I_t1.assign(cfg.N_I_test, 0.0); Mr_I_t2.assign(cfg.N_I_test, 0.0);
+        Mr_J_t1.assign(cfg.N_I_test, 0.0); Mr_J_t2.assign(cfg.N_I_test, 0.0);
+
         Phi_loss1.assign(cfg.N_K_test * cfg.N_I_test * cfg.N_L, 0.0); 
         Phi_loss2.assign(cfg.N_K_test * cfg.N_I_test * cfg.N_L, 0.0);
         N_gain1.assign(cfg.N_K_test * cfg.N_I_test * cfg.N_L, 0.0); 
@@ -185,13 +201,43 @@ inline void compute_polyatomic_inner(const Config& cfg, ThreadScratch& tb,
             fill_internal_array(cfg.N_I, cfg.nu, J_val, cfg.InternalNorm, tb.H_J_trial);
 
             double E = 0.5 * u_mag * u_mag + I_val + J_val;
-            
-            // Singularity scaling (x_i) ensures analytic transition probability across all interaction potentials
-            double B_val = (std::pow(u_mag * std::sqrt(2.0), cfg.alpha) + std::pow(I_val + J_val, cfg.alpha / 2.0)) / std::pow(x_i, cfg.alpha / 2.0);
+
+            // Extended-model (eq 43) non-frozen internal-energy modulation:
+            //   B *= 1 + eta_hat[ (r(1-R) i)^{zeta_hat/2} + ((1-r)(1-R) i*)^{zeta_hat/2} ],
+            //   i = I/E, i* = J/E.  Separates into per-point scalars gI/gJ (pre-internal)
+            //   times r/R weights handled in the gain r-loop / R-merge and the loss moment.
+            bool use_eta = (cfg.kernel_model == 1 && cfg.eta_hat != 0.0);
+            double gI = 0.0, gJ = 0.0;
+            if (use_eta) {
+                gI = std::pow(I_val / E, cfg.zeta_hat / 2.0);
+                gJ = std::pow(J_val / E, cfg.zeta_hat / 2.0);
+            }
+
+            // Kernel value. The 1/x_i^(alpha/2) factor desingularizes the
+            // translational term |u|^alpha ~ z^(alpha/2) (z = x_i = energy node).
+            //   kernel_model == 0 : legacy polyatomic additive Grad kernel
+            //                       B = (sqrt2 u)^a + (I+J)^(a/2), all over z^(a/2)
+            //                       (the internal term inherits a spurious z^{-a/2};
+            //                        this is the known hard-potential convergence issue).
+            //   kernel_model == 1 : DSMC non-frozen channel B = (sqrt2 u)^zeta only.
+            //                       The R^(zeta/2) factor is carried by the kinetic-
+            //                       partition Jacobi weight W_R, so B is R-independent.
+            double B_val;
+            if (cfg.kernel_model == 1) {
+                B_val = std::pow(u_mag * std::sqrt(2.0), cfg.alpha) / std::pow(x_i, cfg.alpha / 2.0);
+            } else {
+                B_val = (std::pow(u_mag * std::sqrt(2.0), cfg.alpha) + std::pow(I_val + J_val, cfg.alpha / 2.0)) / std::pow(x_i, cfg.alpha / 2.0);
+            }
             
             // Exact Probability Mass Matching: Gain and Loss use identical un-normalized sum representations
             double factor = cfg.W_I[I_idx] * cfg.W_J[J_idx] * B_val * Jac_spatial;
-            double loss_weight = factor * 4.0 * M_PI * cfg.sum_WR * cfg.sum_Wr;
+            // Loss integrates B over (R,r). The eta_hat correction adds the separable
+            // moment eta_hat * SR * (gI*Sr1 + gJ*Sr2), SR=Sum W_R(1-R)^{zh}, Sr1/2 the r-moments.
+            double loss_kernel = cfg.sum_WR * cfg.sum_Wr;
+            if (use_eta) {
+                loss_kernel += cfg.eta_hat * cfg.sum_WR_eta * (gI * cfg.sum_Wr_eta1 + gJ * cfg.sum_Wr_eta2);
+            }
+            double loss_weight = factor * 4.0 * M_PI * loss_kernel;
 
             std::fill(tb.Phi_loss1.begin(), tb.Phi_loss1.end(), 0.0); 
             std::fill(tb.Phi_loss2.begin(), tb.Phi_loss2.end(), 0.0);
@@ -219,6 +265,12 @@ inline void compute_polyatomic_inner(const Config& cfg, ThreadScratch& tb,
                 // Branch A: Integrate r
                 std::fill(tb.M_gain_I.begin(), tb.M_gain_I.end(), 0.0);
                 std::fill(tb.M_gain_J.begin(), tb.M_gain_J.end(), 0.0);
+                if (use_eta) {
+                    std::fill(tb.Mr_I_t1.begin(), tb.Mr_I_t1.end(), 0.0);
+                    std::fill(tb.Mr_I_t2.begin(), tb.Mr_I_t2.end(), 0.0);
+                    std::fill(tb.Mr_J_t1.begin(), tb.Mr_J_t1.end(), 0.0);
+                    std::fill(tb.Mr_J_t2.begin(), tb.Mr_J_t2.end(), 0.0);
+                }
                 for (int r_idx = 0; r_idx < cfg.N_r_nodes; ++r_idx) {
                     double r_val = cfg.r_nodes[r_idx];
                     double I_prime = r_val * (1.0 - R_val) * E;
@@ -227,9 +279,21 @@ inline void compute_polyatomic_inner(const Config& cfg, ThreadScratch& tb,
                     fill_internal_array(cfg.N_I_test, cfg.nu, I_prime, cfg.InternalNorm, tb.H_Ip);
                     fill_internal_array(cfg.N_I_test, cfg.nu, J_prime, cfg.InternalNorm, tb.H_Jp);
 
+                    double wr = cfg.W_r[r_idx];
+                    double wr_t1 = 0.0, wr_t2 = 0.0;
+                    if (use_eta) {
+                        wr_t1 = wr * std::pow(r_val, cfg.zeta_hat / 2.0);          // r^{zh}
+                        wr_t2 = wr * std::pow(1.0 - r_val, cfg.zeta_hat / 2.0);    // (1-r)^{zh}
+                    }
                     for (int i1 = 0; i1 < cfg.N_I_test; ++i1) {
-                        tb.M_gain_I[i1] += cfg.W_r[r_idx] * tb.H_Ip[i1];
-                        tb.M_gain_J[i1] += cfg.W_r[r_idx] * tb.H_Jp[i1];
+                        tb.M_gain_I[i1] += wr * tb.H_Ip[i1];
+                        tb.M_gain_J[i1] += wr * tb.H_Jp[i1];
+                        if (use_eta) {
+                            tb.Mr_I_t1[i1] += wr_t1 * tb.H_Ip[i1];
+                            tb.Mr_I_t2[i1] += wr_t2 * tb.H_Ip[i1];
+                            tb.Mr_J_t1[i1] += wr_t1 * tb.H_Jp[i1];
+                            tb.Mr_J_t2[i1] += wr_t2 * tb.H_Jp[i1];
+                        }
                     }
                 }
 
@@ -292,13 +356,22 @@ inline void compute_polyatomic_inner(const Config& cfg, ThreadScratch& tb,
                     }
                 }
 
-                // Merge Branches A and B
+                // Merge Branches A and B. The eta_hat correction folds into an effective
+                // post-internal moment: M_eff = M_gain + eta_hat (1-R)^{zh} (gI*Mr_t1 + gJ*Mr_t2).
+                double wR = cfg.W_R[R_idx];
+                double eta_R = use_eta ? cfg.eta_hat * std::pow(1.0 - R_val, cfg.zeta_hat / 2.0) : 0.0;
                 for (int t_chan = 0; t_chan < cfg.N_L; ++t_chan) {
                     for (int i1 = 0; i1 < cfg.N_I_test; ++i1) {
+                        double mI = tb.M_gain_I[i1];
+                        double mJ = tb.M_gain_J[i1];
+                        if (use_eta) {
+                            mI += eta_R * (gI * tb.Mr_I_t1[i1] + gJ * tb.Mr_I_t2[i1]);
+                            mJ += eta_R * (gI * tb.Mr_J_t1[i1] + gJ * tb.Mr_J_t2[i1]);
+                        }
                         for (int k1 = 0; k1 < cfg.N_K_test; ++k1) {
                             int ng_idx = k1 + cfg.N_K_test * (i1 + cfg.N_I_test * t_chan);
-                            tb.N_gain1[ng_idx] += cfg.W_R[R_idx] * tb.M_gain_I[i1] * tb.S_gain1[k1 + cfg.N_K_test * t_chan];
-                            tb.N_gain2[ng_idx] += cfg.W_R[R_idx] * tb.M_gain_J[i1] * tb.S_gain2[k1 + cfg.N_K_test * t_chan];
+                            tb.N_gain1[ng_idx] += wR * mI * tb.S_gain1[k1 + cfg.N_K_test * t_chan];
+                            tb.N_gain2[ng_idx] += wR * mJ * tb.S_gain2[k1 + cfg.N_K_test * t_chan];
                         }
                     }
                 }
@@ -341,6 +414,173 @@ inline void compute_polyatomic_inner(const Config& cfg, ThreadScratch& tb,
 }
 
 // ========================================================================
+// FROZEN (ELASTIC) INNER  -- DSMC frozen channel, kernel_model == 2
+// ========================================================================
+// Frozen collisions are elastic: the internal energies are unchanged
+// (I'=I, J'=J) and the Dirac deltas delta(r-r')delta(R-R') collapse the
+// kinetic/internal partition integrals to the single point
+//      R' = (1/2) u^2 / E,   r' = I / (I + J),
+// which reproduces I'=I, J'=J and the elastic relative speed u' = |u|.
+// The deltas leave the operator measure H_delta(r',R') as an explicit weight,
+//      H_delta(r,R) = (r(1-r))^nu (1-R)^(2 nu + 1) sqrt(R)   (Djordjic eq 18).
+// The kernel is the purely translational frozen VHS form B^f = (sqrt2 |u|)^zeta.
+inline void compute_frozen_inner(const Config& cfg, ThreadScratch& tb,
+                                 double Jac_spatial, double u_mag, double x_i,
+                                 double U_x1, double U_z1, double u_x1, double u_z1,
+                                 double U_x2, double U_z2, double u_x2, double u_z2,
+                                 const double* P_loss, const double* P_gain, int spatial_stride) {
+
+    const double eps_safe = 1e-15;
+    double u_mag1 = std::sqrt(std::max(u_x1*u_x1 + u_z1*u_z1, eps_safe));
+    double z_scat_x1 = u_x1 / u_mag1; double z_scat_z1 = u_z1 / u_mag1;
+
+    double u_mag2 = std::sqrt(std::max(u_x2*u_x2 + u_z2*u_z2, eps_safe));
+    double z_scat_x2 = u_x2 / u_mag2; double z_scat_z2 = u_z2 / u_mag2;
+
+    double u_prime = u_mag;                       // elastic: |u'| = |u|
+    double B_val = std::pow(u_mag * std::sqrt(2.0), cfg.alpha) / std::pow(x_i, cfg.alpha / 2.0);
+
+    for (int I_idx = 0; I_idx < cfg.N_I_nodes; ++I_idx) {
+        double I_val = cfg.I_nodes[I_idx];
+        fill_internal_array(cfg.N_I_test, cfg.nu, I_val, cfg.InternalNorm, tb.H_I_test);
+        fill_internal_array(cfg.N_I, cfg.nu, I_val, cfg.InternalNorm, tb.H_I_trial);
+
+        for (int J_idx = 0; J_idx < cfg.N_J_nodes; ++J_idx) {
+            double J_val = cfg.J_nodes[J_idx];
+            fill_internal_array(cfg.N_I_test, cfg.nu, J_val, cfg.InternalNorm, tb.H_J_test);
+            fill_internal_array(cfg.N_I, cfg.nu, J_val, cfg.InternalNorm, tb.H_J_trial);
+
+            // Frozen channel: the internal energies are pure spectators (I'=I,
+            // J'=J). This routine integrates directly in internal-energy space
+            // over the Laguerre nodes (I_val, J_val) with weights W_I * W_J,
+            // and basis orthonormality (int H_a H_b I^nu e^{-I} dI = delta_ab)
+            // carries the frozen Kronecker structure. There is therefore NO
+            // (R,r)-partition measure here -- the kernel is the purely
+            // translational elastic VHS form B^f = (sqrt2 |u|)^zeta and the
+            // collision is monatomic-elastic in velocity (u' = |u|).
+            double factor = cfg.W_I[I_idx] * cfg.W_J[J_idx] * B_val * Jac_spatial;
+
+            // Extended-model (eq 43) frozen internal-energy modulation:
+            //   B^f *= 1 + eta_hat_f ( i^{zeta_hat_f} + i*^{zeta_hat_f} ),  i=I/E, i*=J/E.
+            // A single per-(I,J,u) scalar; scales gain and loss equally so the elastic
+            // (I'=I, J'=J) collision still conserves mass/momentum/energy.
+            if (cfg.eta_hat_f != 0.0) {
+                double E = 0.5 * u_mag * u_mag + I_val + J_val;
+                double hf = 1.0 + cfg.eta_hat_f * ( std::pow(I_val / E, cfg.zeta_hat_f)
+                                                  + std::pow(J_val / E, cfg.zeta_hat_f) );
+                factor *= hf;
+            }
+
+            double loss_weight = factor * 4.0 * M_PI;
+
+            // --- Loss term (test functions at the pre-collision state (v,I)) ---
+            std::fill(tb.Phi_loss1.begin(), tb.Phi_loss1.end(), 0.0);
+            std::fill(tb.Phi_loss2.begin(), tb.Phi_loss2.end(), 0.0);
+            for (int t_chan = 0; t_chan < cfg.N_L; ++t_chan) {
+                int l_1 = (int)cfg.L_triplets[t_chan + cfg.N_L * 0];
+                double loss_int = loss_weight * P_loss[t_chan * spatial_stride];
+                for (int i1 = 0; i1 < cfg.N_I_test; ++i1) {
+                    for (int k1 = 0; k1 < cfg.N_K_test; ++k1) {
+                        int ph_idx = k1 + cfg.N_K_test * (i1 + cfg.N_I_test * t_chan);
+                        tb.Phi_loss1[ph_idx] = loss_int * tb.Rad_large[k1 + cfg.N_K_rad * l_1] * tb.H_I_test[i1];
+                        tb.Phi_loss2[ph_idx] = loss_int * tb.Rad_small[k1 + cfg.N_K_rad * l_1] * tb.H_J_test[i1];
+                    }
+                }
+            }
+
+            // --- Gain term: spatial scattering at the single frozen point ---
+            // Internal factor is the test basis at the (unchanged) post energy
+            // I'=I, J'=J, i.e. exactly H_I_test / H_J_test (no r-integral).
+            std::fill(tb.S_gain1.begin(), tb.S_gain1.end(), 0.0);
+            std::fill(tb.S_gain2.begin(), tb.S_gain2.end(), 0.0);
+            for (int n = 0; n < cfg.N_chi; ++n) {
+                double c_chi = cfg.mu_chi[n];
+                double s_chi = std::sqrt(std::max(1.0 - c_chi * c_chi, 0.0));
+                for (int e_idx = 0; e_idx < cfg.N_eps; ++e_idx) {
+                    double u_px = s_chi * (*cfg.c_eps)[e_idx];
+                    double u_py = s_chi * (*cfg.s_eps)[e_idx];
+                    double u_pz = c_chi;
+
+                    double up_x1 = u_px * z_scat_z1 + u_pz * z_scat_x1;
+                    double up_z1 = -u_px * z_scat_x1 + u_pz * z_scat_z1;
+                    double vp_x1 = 0.5 * (U_x1 + u_prime * up_x1);
+                    double vp_y1 = 0.5 * (u_prime * u_py);
+                    double vp_z1 = 0.5 * (U_z1 + u_prime * up_z1);
+                    double vp_mag1 = std::sqrt(std::max(vp_x1*vp_x1 + vp_y1*vp_y1 + vp_z1*vp_z1, eps_safe));
+                    double x_val1 = std::max(std::min(vp_z1 / vp_mag1, 1.0), -1.0);
+                    double rho1 = std::sqrt(std::max(vp_x1*vp_x1 + vp_y1*vp_y1, eps_safe));
+                    eval_SH_fast(x_val1, vp_x1 / rho1, vp_y1 / rho1, cfg.N_Q, cfg.SH_Norm, tb.Y_tmp1.data());
+                    fill_radial_table(cfg.N_K_rad, cfg.L_max, vp_mag1, cfg.RadialNorm, tb.rad_vpmag1);
+
+                    double up_x2 = u_px * z_scat_z2 + u_pz * z_scat_x2;
+                    double up_z2 = -u_px * z_scat_x2 + u_pz * z_scat_z2;
+                    double vp_x2 = 0.5 * (U_x2 + u_prime * up_x2);
+                    double vp_y2 = 0.5 * (u_prime * u_py);
+                    double vp_z2 = 0.5 * (U_z2 + u_prime * up_z2);
+                    double vp_mag2 = std::sqrt(std::max(vp_x2*vp_x2 + vp_y2*vp_y2 + vp_z2*vp_z2, eps_safe));
+                    double x_val2 = std::max(std::min(vp_z2 / vp_mag2, 1.0), -1.0);
+                    double rho2 = std::sqrt(std::max(vp_x2*vp_x2 + vp_y2*vp_y2, eps_safe));
+                    eval_SH_fast(x_val2, vp_x2 / rho2, vp_y2 / rho2, cfg.N_Q, cfg.SH_Norm, tb.Y_tmp2.data());
+                    fill_radial_table(cfg.N_K_rad, cfg.L_max, vp_mag2, cfg.RadialNorm, tb.rad_vpmag2);
+
+                    for (int t_chan = 0; t_chan < cfg.N_L; ++t_chan) {
+                        int l_1 = (int)cfg.L_triplets[t_chan + cfg.N_L * 0];
+                        double g_val1 = 0.0; double g_val2 = 0.0;
+                        for (int idx = 0; idx < cfg.N_Q; ++idx) {
+                            int q_i = (int)cfg.qi_valid_mat[idx + cfg.N_Q * t_chan];
+                            if (q_i == -1) break;
+                            q_i -= 1;
+                            double w_ang = P_gain[q_i * spatial_stride + cfg.N_Q * spatial_stride * t_chan];
+                            g_val1 += tb.Y_tmp1[q_i] * w_ang;
+                            g_val2 += tb.Y_tmp2[q_i] * w_ang;
+                        }
+                        double wg1 = g_val1 * cfg.W_chi[n] * cfg.W_eps[e_idx];
+                        double wg2 = g_val2 * cfg.W_chi[n] * cfg.W_eps[e_idx];
+                        for (int k1 = 0; k1 < cfg.N_K_test; ++k1) {
+                            tb.S_gain1[k1 + cfg.N_K_test * t_chan] += wg1 * tb.rad_vpmag1[k1 + cfg.N_K_rad * l_1];
+                            tb.S_gain2[k1 + cfg.N_K_test * t_chan] += wg2 * tb.rad_vpmag2[k1 + cfg.N_K_rad * l_1];
+                        }
+                    }
+                }
+            }
+
+            // --- Dense contraction (same layout & particle symmetry as non-frozen) ---
+            for (int t_chan = 0; t_chan < cfg.N_L; ++t_chan) {
+                for (int i1 = 0; i1 < cfg.N_I_test; ++i1) {
+                    for (int k1 = 0; k1 < cfg.N_K_test; ++k1) {
+                        int ph_idx = k1 + cfg.N_K_test * (i1 + cfg.N_I_test * t_chan);
+                        // Gain internal factor = H_I_test[i1] (post energy I'=I);
+                        // single frozen point so no W_R / W_r weighting.
+                        tb.net1[k1] = factor * (tb.H_I_test[i1] * tb.S_gain1[k1 + cfg.N_K_test * t_chan]) - tb.Phi_loss1[ph_idx];
+                        tb.net2[k1] = factor * (tb.H_J_test[i1] * tb.S_gain2[k1 + cfg.N_K_test * t_chan]) - tb.Phi_loss2[ph_idx];
+                    }
+
+                    int l_2 = (int)cfg.L_triplets[t_chan + cfg.N_L * 1];
+                    int l_3 = (int)cfg.L_triplets[t_chan + cfg.N_L * 2];
+
+                    for (int i3 = 0; i3 < cfg.N_I; ++i3) {
+                        for (int i2 = 0; i2 < cfg.N_I; ++i2) {
+                            for (int k3 = 0; k3 < cfg.N_K; ++k3) {
+                                for (int k2 = 0; k2 < cfg.N_K; ++k2) {
+                                    double p1 = tb.H_I_trial[i2] * tb.H_J_trial[i3] * tb.Rad_large[k2 + cfg.N_K_rad * l_2] * tb.Rad_small[k3 + cfg.N_K_rad * l_3];
+                                    double p2 = tb.H_J_trial[i2] * tb.H_I_trial[i3] * tb.Rad_small[k2 + cfg.N_K_rad * l_2] * tb.Rad_large[k3 + cfg.N_K_rad * l_3];
+                                    int out_idx = 0 + cfg.N_K_test * (k2 + cfg.N_K * (k3 + cfg.N_K * (i1 + cfg.N_I_test * (i2 + cfg.N_I * (i3 + cfg.N_I * t_chan)))));
+                                    double* R_ptr = &tb.R_local[out_idx];
+                                    #pragma omp simd
+                                    for (int k1 = 0; k1 < cfg.N_K_test; ++k1) {
+                                        R_ptr[k1] += tb.net1[k1] * p1 + tb.net2[k1] * p2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } // End J loop
+    } // End I loop
+}
+
+// ========================================================================
 // PATCH EVALUATIONS (SPATIAL WRAPPERS)
 // ========================================================================
 
@@ -374,9 +614,15 @@ inline void compute_patch1(const Config& cfg, int i, double x_i, ThreadScratch& 
             const double* P_loss_ptr = &cfg.P_loss_p1[spatial_idx];
             const double* P_gain_ptr = &cfg.P_gain_p1[spatial_idx];
 
-            compute_polyatomic_inner(cfg, tb, Jac_spatial, u_mag, x_i,
-                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2, 
+            if (cfg.kernel_model == 2) {
+                compute_frozen_inner(cfg, tb, Jac_spatial, u_mag, x_i,
+                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2,
                                      P_loss_ptr, P_gain_ptr, spatial_stride);
+            } else {
+                compute_polyatomic_inner(cfg, tb, Jac_spatial, u_mag, x_i,
+                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2,
+                                     P_loss_ptr, P_gain_ptr, spatial_stride);
+            }
         }
     }
 }
@@ -412,9 +658,15 @@ inline void compute_patch2(const Config& cfg, int i, double x_i, ThreadScratch& 
             const double* P_loss_ptr = &cfg.P_loss_p2[spatial_idx];
             const double* P_gain_ptr = &cfg.P_gain_p2[spatial_idx];
 
-            compute_polyatomic_inner(cfg, tb, Jac_spatial, u_mag, x_i,
-                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2, 
+            if (cfg.kernel_model == 2) {
+                compute_frozen_inner(cfg, tb, Jac_spatial, u_mag, x_i,
+                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2,
                                      P_loss_ptr, P_gain_ptr, spatial_stride);
+            } else {
+                compute_polyatomic_inner(cfg, tb, Jac_spatial, u_mag, x_i,
+                                     U_x1, U_z1, u_x1, u_z1, U_x2, U_z2, u_x2, u_z2,
+                                     P_loss_ptr, P_gain_ptr, spatial_stride);
+            }
         }
     }
 }
@@ -423,8 +675,8 @@ inline void compute_patch2(const Config& cfg, int i, double x_i, ThreadScratch& 
 // MEX MAIN FUNCTION
 // ========================================================================
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
-    if (nrhs != 39) {
-        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires exactly 39 inputs for Polyatomic Sum-Factorization.");
+    if (nrhs != 39 && nrhs != 40 && nrhs != 44) {
+        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires 39 inputs (legacy), 40 (with kernel_model), or 44 (with extended-model eta_hat/zeta_hat/eta_hat_f/zeta_hat_f).");
     }
     
     Config cfg;
@@ -464,8 +716,23 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     cfg.K_test = (int)mxGetScalar(prhs[37]); cfg.N_K_test = cfg.K_test + 1;
     cfg.I_test = (int)mxGetScalar(prhs[38]); cfg.N_I_test = cfg.I_test + 1;
 
+    // Optional kernel-model flag (default 0 = legacy polyatomic kernel).
+    cfg.kernel_model = (nrhs >= 40) ? (int)mxGetScalar(prhs[39]) : 0;
+
+    // Extended-model (eq 43) modulation params (default 0 = base DSMC kernel).
+    cfg.eta_hat    = (nrhs == 44) ? mxGetScalar(prhs[40]) : 0.0;
+    cfg.zeta_hat   = (nrhs == 44) ? mxGetScalar(prhs[41]) : 0.0;
+    cfg.eta_hat_f  = (nrhs == 44) ? mxGetScalar(prhs[42]) : 0.0;
+    cfg.zeta_hat_f = (nrhs == 44) ? mxGetScalar(prhs[43]) : 0.0;
+
     cfg.sum_WR = 0.0; for(int q=0; q<cfg.N_R_nodes; ++q) cfg.sum_WR += cfg.W_R[q];
     cfg.sum_Wr = 0.0; for(int q=0; q<cfg.N_r_nodes; ++q) cfg.sum_Wr += cfg.W_r[q];
+
+    // Separable 1-D moments of the non-frozen eta_hat weight (r(1-R))^{zeta_hat/2}.
+    const double zh = cfg.zeta_hat / 2.0;
+    cfg.sum_WR_eta = 0.0; for(int q=0; q<cfg.N_R_nodes; ++q) cfg.sum_WR_eta += cfg.W_R[q] * std::pow(1.0 - cfg.R_nodes[q], zh);
+    cfg.sum_Wr_eta1 = 0.0; for(int q=0; q<cfg.N_r_nodes; ++q) cfg.sum_Wr_eta1 += cfg.W_r[q] * std::pow(cfg.r_nodes[q], zh);
+    cfg.sum_Wr_eta2 = 0.0; for(int q=0; q<cfg.N_r_nodes; ++q) cfg.sum_Wr_eta2 += cfg.W_r[q] * std::pow(1.0 - cfg.r_nodes[q], zh);
 
     mwSize dims[7] = {(mwSize)cfg.N_K_test, (mwSize)cfg.N_K, (mwSize)cfg.N_K, 
                       (mwSize)cfg.N_I_test, (mwSize)cfg.N_I, (mwSize)cfg.N_I, 
