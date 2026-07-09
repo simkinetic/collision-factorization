@@ -6,11 +6,19 @@ function run_tests()
     % 1. Define Paths relative to this script
     root_dir = fileparts(mfilename('fullpath'));
     src_dir = fullfile(root_dir, 'src');
+    shl_dir = fullfile(src_dir, 'SHL');
+    mex_dir = fullfile(src_dir, 'mex');
     test_dir = fullfile(root_dir, 'tests');
     
     % 2. Check folders exist
     if ~exist(src_dir, 'dir')
         error('Source folder not found: %s', src_dir);
+    end
+    if ~exist(shl_dir, 'dir')
+        error('SHL source folder not found: %s', shl_dir);
+    end
+    if ~exist(mex_dir, 'dir')
+        error('MEX source folder not found: %s', mex_dir);
     end
     if ~exist(test_dir, 'dir')
         warning('Test folder not found: %s', test_dir);
@@ -19,10 +27,14 @@ function run_tests()
     
     % 3. Add paths temporarily (Auto-remove when function exits)
     addpath(src_dir);
+    addpath(shl_dir);
+    addpath(mex_dir);
     addpath(test_dir);
-    
+
     cleanupObj1 = onCleanup(@() rmpath(src_dir));
-    cleanupObj2 = onCleanup(@() rmpath(test_dir));
+    cleanupObj2 = onCleanup(@() rmpath(shl_dir));
+    cleanupObj3 = onCleanup(@() rmpath(mex_dir));
+    cleanupObj4 = onCleanup(@() rmpath(test_dir));
     
     fprintf('Running tests in: %s\n', test_dir);
     fprintf('--------------------------------------------------\n');
