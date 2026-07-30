@@ -6,9 +6,13 @@
 % conserved to machine precision.
 %
 % Two sweeps:
-%   A) internal DOF d_i in {2,4,6} (fixed omega): same (T_v0,T_I0) relaxes to
-%      DIFFERENT equilibria  T_eq = (3 T_v0 + d_i T_I0)/(3 + d_i).
-%   B) DSMC split omega in {0.25,0.5,0.75,1.0} (fixed d_i=2): SAME T_eq (energy
+%   A) internal DOF d_i in {2,3,4} (fixed omega=1, Maxwell molecules zeta=0):
+%      same (T_v0,T_I0) = (4/3,1) relaxes to DIFFERENT rational equilibria
+%      T_eq = (3 T_v0 + d_i T_I0)/(3 + d_i) = (4+d_i)/(3+d_i) = 6/5, 7/6, 8/7.
+%      The operator is rescaled to unit equilibrium collision frequency nu_0
+%      (read off the shear mode, see collision_frequency below), so the decay
+%      rate must equal the Landau-Teller rate (3+d_i)/(3+2 d_i) = 5/7, 2/3, 7/11.
+%   B) DSMC split omega in {0.25,0.5,0.75,1.0} (fixed d_i=2, zeta=0.5): SAME T_eq (energy
 %      conservation is omega-independent) but DIFFERENT rates. The frozen
 %      channel is elastic and leaves both energy modes invariant, so the
 %      (T_v - T_I) decay rate is exactly proportional to omega.
@@ -28,16 +32,29 @@ export_to_pdf_figure = true;
 %% --- Global parameters (all tunable) ------------------------------------
 K_max = 2; L_max = 2; I_max = 2;
 rad_pad = 10; tan_pad = 10; int_pad = 10;
-zeta = 0.5;                 % s_visc = 0.75  ->  |u|^zeta
-% Initial temperatures. Keep the gap modest so the product-Maxwellian projects
-% cleanly at low K (Sonine truncation ~ ((T-1)/T)^K); T_v0=1.4 gives ~2% at K=2.
-T_v0 = 1.4;   T_I0 = 1.0;
+zeta   = 0.5;               % s_visc = 0.75  ->  |u|^zeta   (sweep B + conservation)
+zeta_A = 0.0;               % Maxwell molecules for sweep A: the Landau-Teller law
+                            % below is exact only for a speed-independent rate.
+% Initial temperatures. Rational values so the equilibria are rational too; the
+% gap stays modest so the product-Maxwellian projects cleanly at low K (Sonine
+% truncation ~ ((T-1)/T)^K); T_v0 = 4/3 gives ~2% at K=2.
+T_v0 = 4/3;   T_I0 = 1.0;
 
-Teq_of = @(di) (3*T_v0 + di*T_I0) / (3 + di);   % predicted equilibrium temperature
+Teq_of = @(di) (3*T_v0 + di*T_I0) / (3 + di);   % = (4+di)/(3+di) for T_v0=4/3
+Teq_str  = {'6/5', '7/6', '8/7'};               % exact rationals, in di_list order
 
-fprintf('Resolution K=%d L=%d I=%d  padding=(%d,%d,%d)  zeta=%.3f\n', ...
-    K_max, L_max, I_max, rad_pad, tan_pad, int_pad, zeta);
-fprintf('Initial temperatures: T_v0=%.3f  T_I0=%.3f\n\n', T_v0, T_I0);
+% Landau-Teller energy-exchange rate for the Borgnakke-Larsen model at omega=1,
+% for an operator normalized to unit equilibrium collision frequency nu_0=1.
+% With <R> = (3/2)/(3/2+delta) under the partition measure and E = m|u|^2/4+I+J,
+%   d<I>/dt = nu_0 ( <r(1-R)E> - <I> )  ->  d(T_v-T_I)/dt = -lambda_LT (T_v-T_I),
+%   lambda_LT = nu_0 (3+d_i)/(3+2 d_i).
+lambda_LT = @(di) (3 + di) / (3 + 2*di);
+lamLT_str = {'5/7', '2/3', '7/11'};             % exact rationals, in di_list order
+
+fprintf('Resolution K=%d L=%d I=%d  padding=(%d,%d,%d)\n', ...
+    K_max, L_max, I_max, rad_pad, tan_pad, int_pad);
+fprintf('zeta: sweep A = %.3f (Maxwell, nu_0 normalized to 1)  sweep B = %.3f\n', zeta_A, zeta);
+fprintf('Initial temperatures: T_v0=%.4f (4/3)  T_I0=%.4f\n\n', T_v0, T_I0);
 
 %% ========================================================================
 %  SWEEP A: internal degrees of freedom d_i  (different equilibria)
@@ -45,13 +62,17 @@ fprintf('Initial temperatures: T_v0=%.3f  T_I0=%.3f\n\n', T_v0, T_I0);
 di_list = [2, 3, 4];
 sweepA = struct('di',{},'t',{},'Tv',{},'Ti',{},'Teq_num',{},'rate',{});
 
-fprintf('--- Sweep A: internal DOF d_i (omega = 1) ---\n');
+fprintf('--- Sweep A: internal DOF d_i (omega = 1, zeta = %.2f, nu_0 = 1) ---\n', zeta_A);
 for a = 1:numel(di_list)
     d_i = di_list(a);   delta = d_i;   nu = delta/2 - 1;
     fprintf('  Building DSMC operator: d_i=%d (nu=%.2f)...\n', d_i, nu);
 
     Basis = SpectralBasis(K_max, L_max, I_max, nu);
-    C = build_C(Basis, delta, zeta, 1.0, rad_pad, tan_pad, int_pad);
+    C_raw = build_C(Basis, delta, zeta_A, 1.0, rad_pad, tan_pad, int_pad);
+    % Rescale to unit equilibrium collision frequency so the decay rate is
+    % directly comparable to the Landau-Teller prediction across d_i.
+    nu0   = collision_frequency(C_raw, Basis);
+    C     = C_raw / nu0;
     calib = calibrate_temperature(Basis);
 
     tg = make_time_grid(C, Basis);
@@ -63,8 +84,13 @@ for a = 1:numel(di_list)
     sweepA(a).Teq_num = 0.5*(R.Tv(end) + R.Ti(end));
     sweepA(a).rate = fit_rate(R.t, R.Tv, R.Ti);
     sweepA(a).rate_ex = tg.rate_ex;
-    fprintf('    T_eq: pred=%.4f num=%.4f | rate: fit=%.4f eig=%.4f | max|l>=1|=%.1e\n', ...
-        Teq_of(d_i), sweepA(a).Teq_num, sweepA(a).rate, sweepA(a).rate_ex, R.aniso);
+    sweepA(a).rate_LT = lambda_LT(d_i);
+    sweepA(a).nu0     = nu0;
+    sweepA(a).err_LT  = abs(tg.rate_ex - sweepA(a).rate_LT) / sweepA(a).rate_LT;
+    fprintf(['    nu_0=%.4e | T_eq: pred=%.6f num=%.6f | ' ...
+             'rate: fit=%.6f eig=%.6f LT=%.6f (%s) relerr=%.1e | max|l>=1|=%.1e\n'], ...
+        nu0, Teq_of(d_i), sweepA(a).Teq_num, sweepA(a).rate, sweepA(a).rate_ex, ...
+        sweepA(a).rate_LT, lamLT_str{a}, sweepA(a).err_LT, R.aniso);
 end
 fprintf('\n');
 
@@ -121,10 +147,14 @@ fprintf('\n');
 %% ========================================================================
 %  CONSOLE SUMMARY TABLES
 %  ========================================================================
-fprintf('=== Sweep A: equilibrium temperature vs d_i ===\n');
-fprintf('  %4s | %10s | %10s\n', 'd_i', 'T_eq_pred', 'T_eq_num');
+fprintf('=== Sweep A: equilibrium temperature and Landau-Teller rate vs d_i ===\n');
+fprintf('  (zeta=%.2f, omega=1, operator normalized to unit collision frequency nu_0=1)\n', zeta_A);
+fprintf('  %4s | %8s | %10s | %10s | %10s | %10s | %9s\n', ...
+    'd_i', 'T_eq', 'T_eq_pred', 'T_eq_num', 'rate_eig', 'lambda_LT', 'rel.err');
 for a = 1:numel(sweepA)
-    fprintf('  %4d | %10.4f | %10.4f\n', sweepA(a).di, Teq_of(sweepA(a).di), sweepA(a).Teq_num);
+    fprintf('  %4d | %8s | %10.6f | %10.6f | %10.6f | %10.6f | %9.2e\n', ...
+        sweepA(a).di, Teq_str{a}, Teq_of(sweepA(a).di), sweepA(a).Teq_num, ...
+        sweepA(a).rate_ex, sweepA(a).rate_LT, sweepA(a).err_LT);
 end
 fprintf('\n=== Sweep B: decay rate vs omega (d_i=%g) -- rate proportional to omega ===\n', delta_B);
 fprintf('  (frozen channel is elastic -> leaves both energy modes invariant -> rate/omega is constant)\n');
@@ -153,37 +183,55 @@ if ~exist(outdir,'dir'), mkdir(outdir); end
 % ---- Figure 1: Sweep A (internal DOF) -----------------------------------
 fig1 = figure('Name','Sweep A: internal DOF','Position',[80 80 1000 420],'Color','w');
 
+% Decay window: ~6 e-folds of the slowest case (rates are now O(1), since the
+% operator carries unit equilibrium collision frequency).
+t_max = 6 / min([sweepA.rate]);
+
 subplot(1,2,1); hold on; grid on;
 for a = 1:numel(sweepA)
     c = colA(a,:);
-    plot(sweepA(a).t, sweepA(a).Tv, '-',  'Color', c, 'LineWidth', 2);
-    plot(sweepA(a).t, sweepA(a).Ti, '--', 'Color', c, 'LineWidth', 2);
-    yline(Teq_of(sweepA(a).di), ':', 'Color', c, 'LineWidth', 1.2);
+    w = sweepA(a).t <= t_max;       % truncate so the label gutter stays clear
+    plot(sweepA(a).t(w), sweepA(a).Tv(w), '-',  'Color', c, 'LineWidth', 2);
+    plot(sweepA(a).t(w), sweepA(a).Ti(w), '--', 'Color', c, 'LineWidth', 2);
+    yline(Teq_of(sweepA(a).di), ':', 'Color', c, 'LineWidth', 0.8);
 end
 xlabel('Time $t$','FontSize',FS_labels);
 ylabel('Temperature','FontSize',FS_labels);
 title('\textbf{(a) Relaxation to $T_{\mathrm{eq}}(d_i)$}','FontSize',FS_title);
 set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
-xlim([0 0.1]);                      % zoom on the informative decay window
-lg = arrayfun(@(s) sprintf('$d_i=%d$', s.di), sweepA, 'UniformOutput', false);
+xlim([0 t_max*1.18]);               % right 15% is the gutter for the T_eq labels
+% Exact rational equilibria, at the right edge next to the curve pair they belong to.
+for a = 1:numel(sweepA)
+    text(t_max*1.02, Teq_of(sweepA(a).di), ['$', Teq_str{a}, '$'], ...
+        'Color', colA(a,:), 'FontSize', FS_legend+1, 'FontWeight','bold', ...
+        'HorizontalAlignment','left', 'VerticalAlignment','middle', 'Clipping','off');
+end
 % one representative pair for the legend semantics
-text(0.98,0.05,'solid: $T_v$\quad dashed: $T_I$\quad dotted: $T_{\mathrm{eq}}$', ...
+text(0.84,0.06,'solid: $T_v$\quad dashed: $T_I$\quad dotted: $T_{\mathrm{eq}}$', ...
     'Units','normalized','HorizontalAlignment','right','FontSize',FS_legend, ...
     'BackgroundColor',[1 1 1 0.7],'EdgeColor','k','Margin',3);
 
 subplot(1,2,2); hold on; grid on;
 set(gca,'YScale','log');
-h = gobjects(1,numel(sweepA));
+h = gobjects(1,numel(sweepA)+1); lgA = cell(1,numel(sweepA)+1);
+dT0 = T_v0 - T_I0;
 for a = 1:numel(sweepA)
     dT = max(abs(sweepA(a).Tv - sweepA(a).Ti), eps);
-    h(a) = plot(sweepA(a).t, dT, '-', 'Color', colA(a,:), 'LineWidth', 2);
+    h(a) = plot(sweepA(a).t, dT, '-', 'Color', colA(a,:), 'LineWidth', 2.4);
+    lgA{a} = sprintf('$d_i=%d$ \\ ($\\lambda_{\\mathrm{LT}}=%s$)', sweepA(a).di, lamLT_str{a});
 end
+% Landau-Teller prediction lambda = (3+d_i)/(3+2 d_i) at nu_0 = 1, overlaid last
+% so it reads as the reference the data lies on.
+for a = 1:numel(sweepA)
+    hLT = plot(sweepA(a).t, dT0*exp(-sweepA(a).rate_LT*sweepA(a).t), 'k--', 'LineWidth', 1.1);
+end
+h(end) = hLT; lgA{end} = 'Landau--Teller $\;\frac13 e^{-\lambda_{\mathrm{LT}}t}$';
 set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
-xlim([0 0.1]); ylim([1e-3 1e0]);
+xlim([0 t_max]); ylim([1e-4 1e0]);
 xlabel('Time $t$','FontSize',FS_labels);
 ylabel('$|T_v - T_I|$','FontSize',FS_labels);
-title('\textbf{(b) Exponential relaxation}','FontSize',FS_title);
-legend(h, lg, 'Location','northeast','FontSize',FS_legend);
+title('\textbf{(b) Landau--Teller decay ($\nu_0=1$)}','FontSize',FS_title);
+legend(h, lgA, 'Location','northeast','FontSize',FS_legend);
 if export_to_pdf_figure
     exportgraphics(fig1, fullfile(outdir,'fig_polyrelax_sweep_di.pdf'), 'ContentType','vector');
 end
@@ -258,8 +306,9 @@ end
 %  ========================================================================
 params = struct('K_max',K_max,'L_max',L_max,'I_max',I_max, ...
     'rad_pad',rad_pad,'tan_pad',tan_pad,'int_pad',int_pad, ...
-    'zeta',zeta,'T_v0',T_v0,'T_I0',T_I0, ...
-    'di_list',di_list,'omega_list',omega_list,'delta_B',delta_B);
+    'zeta',zeta,'zeta_A',zeta_A,'T_v0',T_v0,'T_I0',T_I0, ...
+    'di_list',di_list,'omega_list',omega_list,'delta_B',delta_B, ...
+    'nu0_list',[sweepA.nu0],'rateLT_list',[sweepA.rate_LT]);
 save(fullfile(outdir,'polyrelax_results.mat'), ...
     'sweepA','sweepB','Rcons','Rcons_mx','params','-v7');
 
@@ -289,7 +338,7 @@ writetable(Cb, fullfile(outdir,'polyrelax_conservation.csv'));
 
 % LaTeX summary table for the paper
 write_relaxation_table(fullfile('paper','table_temperature_relaxation.tex'), ...
-    sweepA, sweepB, Teq_of, delta_B);
+    sweepA, sweepB, delta_B, Teq_str, lamLT_str, zeta_A);
 
 fprintf('Saved: %s, per-case CSVs in %s, and paper/table_temperature_relaxation.tex\n', ...
     fullfile(outdir,'polyrelax_results.mat'), outdir);
@@ -307,14 +356,41 @@ function C = build_C(Basis, delta, zeta, omega, rp, tp, ip)
     C  = T.assemble_full_tensor();
 end
 
+function J = linearize(C, Basis)
+    % Linearize the quadratic operator about the Maxwellian (c_eq(1) = 1):
+    % contract each trial slot in turn against the density mode e_1.
+    N = Basis.N_terms;
+    J = squeeze(C(1:N,1:N,1)) + squeeze(C(1:N,1,1:N));
+end
+
+function nu0 = collision_frequency(C, Basis)
+    % Equilibrium collision frequency, read off the shear mode.
+    %
+    % At zeta = 0 the loss term is exactly nu_0*f, scattering is isotropic and
+    % the centre-of-mass velocity G = (v1+v2)/2 is conserved. Writing
+    % v1' = G + u'/2 with u' isotropic, tracefree<u'(x)u'> = 0, so the traceless
+    % second moment sigma of a linearized perturbation obeys the CLOSED equation
+    %   d(sigma)/dt = nu_0 [ tracefree<G(x)G> - sigma ].
+    % tracefree<G(x)G> = (1/4)[ tf<v1 v1> + tf<v2 v2> + 2 tf<v1 (x) v2> ], and the
+    % linearization M(x)df + df(x)M puts the perturbation on EITHER partner, so both
+    % of the first two terms contribute sigma/4 (the cross term vanishes). Hence
+    %   d(sigma)/dt = nu_0 [ sigma/2 - sigma ]  ->  lambda_shear = nu_0 / 2,
+    % independent of d_i. This measures nu_0 in the SHEAR sector and is therefore
+    % independent of the energy-exchange rate it is used to normalize.
+    J    = linearize(C, Basis);
+    idx  = @(k,i,l,m) (k*Basis.N_I + i)*Basis.N_Q + (l^2 + l + m) + 1;
+    cols = arrayfun(@(k) idx(k,0,2,0), 0:Basis.K_max);   % l=2, m=0, i=0 column set
+    ev2  = sort(real(eig(J(cols, cols))), 'descend');    % least-negative = mode (k=0,l=2)
+    nu0  = 2 * abs(ev2(1));
+end
+
 function tg = make_time_grid(C, Basis)
     % Time grid from the linearized operator. The (T_v-T_I) exchange rate is the
     % nonzero eigenvalue of the 2x2 energy-exchange block {(1,0,0),(0,1,0)}; this
     % is the eigenmode the T_v-T_I combination projects onto (and it is exactly
     % proportional to omega, since the frozen elastic channel leaves both energy
     % modes invariant). dt is set from the fastest linear mode (RK2 stability).
-    N = Basis.N_terms;
-    J = squeeze(C(1:N,1:N,1)) + squeeze(C(1:N,1,1:N));   % linearize at Maxwellian (c_eq(1)=1)
+    J = linearize(C, Basis);
     idx = @(k,i,q) (k*Basis.N_I + i)*Basis.N_Q + q;
     blk = [idx(1,0,1), idx(0,1,1)];                     % {(k,i,l)=(1,0,0),(0,1,0)}
     ev  = sort(real(eig(J(blk,blk))));                  % {~0, -lambda}
@@ -426,19 +502,25 @@ function rate = fit_rate(t, Tv, Ti)
     rate = -p(1);
 end
 
-function write_relaxation_table(fname, sweepA, sweepB, Teq_of, delta_B)
-    % Two booktabs tabulars (Sweep A: T_eq vs d_i; Sweep B: rate vs omega) for the
-    % paper. Matches the hand-written paper/table_hydrodynamic_quantities.tex style.
+function write_relaxation_table(fname, sweepA, sweepB, delta_B, Teq_str, lamLT_str, zeta_A)
+    % Two booktabs tabulars (Sweep A: T_eq and Landau-Teller rate vs d_i; Sweep B:
+    % rate vs omega) for the paper. Matches the hand-written
+    % paper/table_hydrodynamic_quantities.tex style.
     fid = fopen(fname, 'w');
     if fid < 0, warning('write_relaxation_table: cannot open %s', fname); return; end
     fprintf(fid, '%% Auto-generated by benchmark_polyatomic_temperature_relaxation.m -- do not edit by hand.\n');
     fprintf(fid, '%% Requires \\usepackage{booktabs}.  Sweep B fixed d_i = %g.\n', delta_B);
-    % Sweep A: equilibrium temperature vs internal DOF
-    fprintf(fid, '\\begin{tabular}{cccc}\n\\toprule\n');
-    fprintf(fid, '$d_i$ & $T_{\\mathrm{eq}}^{\\mathrm{pred}}$ & $T_{\\mathrm{eq}}^{\\mathrm{num}}$ & rate $r$ \\\\\n\\midrule\n');
+    fprintf(fid, '%% Sweep A: zeta = %g (Maxwell), omega = 1, operator normalized to nu_0 = 1.\n', zeta_A);
+    % Sweep A: equilibrium temperature and Landau-Teller rate vs internal DOF
+    fprintf(fid, '\\begin{tabular}{cccccc}\n\\toprule\n');
+    fprintf(fid, ['$d_i$ & $T_{\\mathrm{eq}}$ & $T_{\\mathrm{eq}}^{\\mathrm{num}}$ & ' ...
+                  '$\\lambda_{\\mathrm{LT}}$ & $r_{\\mathrm{eig}}$ & rel.\\ err \\\\\n\\midrule\n']);
     for a = 1:numel(sweepA)
-        fprintf(fid, '%d & %.4f & %.4f & %.3f \\\\\n', ...
-            sweepA(a).di, Teq_of(sweepA(a).di), sweepA(a).Teq_num, sweepA(a).rate);
+        % T_eq_num is limited by the finite integration horizon (~6 dp);
+        % r_eig is a linear eigenvalue and is exact to ~1e-13.
+        fprintf(fid, '%d & $%s$ & %.6f & $%s$ & %.8f & %.1e \\\\\n', ...
+            sweepA(a).di, Teq_str{a}, sweepA(a).Teq_num, ...
+            lamLT_str{a}, sweepA(a).rate_ex, sweepA(a).err_LT);
     end
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
     % Sweep B: decay rate vs omega
