@@ -147,6 +147,9 @@ FS_labels = 15; FS_ticks = 12; FS_legend = 11; FS_title = 15;
 colA = lines(numel(di_list));
 colB = lines(numel(omega_list));
 
+outdir = fullfile('paper','figures');
+if ~exist(outdir,'dir'), mkdir(outdir); end
+
 % ---- Figure 1: Sweep A (internal DOF) -----------------------------------
 fig1 = figure('Name','Sweep A: internal DOF','Position',[80 80 1000 420],'Color','w');
 
@@ -182,7 +185,7 @@ ylabel('$|T_v - T_I|$','FontSize',FS_labels);
 title('\textbf{(b) Exponential relaxation}','FontSize',FS_title);
 legend(h, lg, 'Location','northeast','FontSize',FS_legend);
 if export_to_pdf_figure
-    exportgraphics(fig1, 'fig_polyrelax_sweep_di.pdf', 'ContentType','vector');
+    exportgraphics(fig1, fullfile(outdir,'fig_polyrelax_sweep_di.pdf'), 'ContentType','vector');
 end
 
 % ---- Figure 2: Sweep B (omega) ------------------------------------------
@@ -219,7 +222,7 @@ ylabel('$|T_v - T_I|$','FontSize',FS_labels);
 title('\textbf{(b) Slope $\propto \omega$}','FontSize',FS_title);
 legend(h, lgB, 'Location','northeast','FontSize',FS_legend);
 if export_to_pdf_figure
-    exportgraphics(fig2, 'fig_polyrelax_sweep_omega.pdf', 'ContentType','vector');
+    exportgraphics(fig2, fullfile(outdir,'fig_polyrelax_sweep_omega.pdf'), 'ContentType','vector');
 end
 
 % ---- Figure 3: conservation -- model (black) vs Maxwell control (red) ----
@@ -247,15 +250,12 @@ ylabel('Absolute drift','FontSize',FS_labels);
 title(sprintf('\\textbf{Conservation ($d_i=%g,\\ \\omega=1$): model vs Maxwell control}', delta_B),'FontSize',FS_title);
 legend('Location','east','FontSize',FS_legend);
 if export_to_pdf_figure
-    exportgraphics(fig3, 'fig_polyrelax_conservation.pdf', 'ContentType','vector');
+    exportgraphics(fig3, fullfile(outdir,'fig_polyrelax_conservation.pdf'), 'ContentType','vector');
 end
 
 %% ========================================================================
 %  SAVE RAW RESULTS (re-plotting + paper inclusion)
 %  ========================================================================
-outdir = fullfile('paper','figures');
-if ~exist(outdir,'dir'), mkdir(outdir); end
-
 params = struct('K_max',K_max,'L_max',L_max,'I_max',I_max, ...
     'rad_pad',rad_pad,'tan_pad',tan_pad,'int_pad',int_pad, ...
     'zeta',zeta,'T_v0',T_v0,'T_I0',T_I0, ...
