@@ -25,15 +25,36 @@ conservation fixes the common equilibrium temperature to
 The two temperatures are read off exactly as linear moment functionals of the coefficient vector
 ($T_v=\langle|\vv|^2\rangle/3$, $T_I=\langle I\rangle/(\nu+1)$), so they remain exact regardless of
 basis truncation. Two sweeps isolate the two independent controls (all runs use
-$K_{\max}=I_{\max}=2$, $L_{\max}=2$, $T_v^0=1.4$, $T_I^0=1.0$, $\zeta=0.5$):
+$K_{\max}=I_{\max}=2$, $L_{\max}=2$, $T_v^0=4/3$, $T_I^0=1$; the $d_i$ sweep uses Maxwell
+molecules, $\zeta=0$, and the $\omega$ sweep $\zeta=0.5$):
 
 \begin{itemize}
 \item \textbf{Internal degrees of freedom $d_i$} (Fig.~\ref{fig:relax_di}, $\omega=1$). The same
-initial state relaxes to a \emph{different} $T_{\mathrm{eq}}$ for each $d_i\in\{2,4,6\}$; the
-numerical late-time value reproduces \eqref{eq:Teq} to four digits ($1.2400,\ 1.1714,\ 1.1333$).
+initial state relaxes to a \emph{different} $T_{\mathrm{eq}}$ for each $d_i\in\{2,3,4\}$; with the
+rational initial data the equilibria \eqref{eq:Teq} are themselves rational,
+$T_{\mathrm{eq}}=(4+d_i)/(3+d_i)=\tfrac65,\,\tfrac76,\,\tfrac87$, and are reproduced to all digits
+carried. To make the \emph{rate} comparable across $d_i$ the operator is rescaled to unit
+equilibrium collision frequency, $\nu_0$ being read off the shear sector: at $\zeta=0$ the loss
+term is exactly $\nu_0f$, scattering is isotropic and $\bm G$ is conserved, so the traceless second
+moment obeys the closed equation $\dot\sigma=\nu_0[\tfrac12\sigma-\sigma]$, i.e.
+$\lambda_{\mathrm{shear}}=\nu_0/2$ independently of $d_i$. With $\nu_0=1$ the measured decay rate
+must equal the Landau--Teller rate, obtained from $\langle R\rangle=\tfrac{3/2}{3/2+\delta}$ under
+the Borgnakke--Larsen partition measure and $E=\tfrac m4|\bm u|^2+I+J$,
+\begin{equation}
+  \frac{\mathrm{d}}{\mathrm{d}t}\langle I\rangle=\nu_0\big(\langle r(1-R)E\rangle-\langle I\rangle\big)
+  \quad\Longrightarrow\quad
+  \lambda_{\mathrm{LT}}=\nu_0\,\frac{3+d_i}{3+2d_i},
+  \label{eq:LT}
+\end{equation}
+i.e.\ $\tfrac57,\,\tfrac23,\,\tfrac7{11}$ for $d_i=2,3,4$. The computed energy-exchange
+eigenvalues reproduce these to a relative error below $10^{-12}$. Note that at fixed collision
+frequency the rate \emph{decreases} monotonically with $d_i$, from $\nu_0$ in the monatomic limit
+to $\nu_0/2$ as $d_i\to\infty$. This is a sharp test of the operator: $\nu_0$ is measured in the
+shear ($l=2$) sector and then predicts the energy-exchange ($l=0$) sector, so no fitted constant
+links the two.
 \item \textbf{DSMC convex-split weight $\omega$} (Fig.~\ref{fig:relax_omega}, $d_i=2$). Because
 energy conservation is independent of $\omega$, every $\omega$ relaxes to the \emph{same}
-$T_{\mathrm{eq}}=1.240$, but at a \emph{different} rate. The frozen channel is elastic and leaves
+$T_{\mathrm{eq}}=6/5$, but at a \emph{different} rate. The frozen channel is elastic and leaves
 both energy modes $(1,0,0)$ and $(0,1,0)$ invariant, so its energy-exchange block vanishes and the
 $T_v-T_I$ relaxation rate is exactly proportional to $\omega$: the measured slopes yield
 $r(\omega)/r(1)=0.251,\,0.502,\,0.751,\,1.000$.
@@ -41,15 +62,19 @@ $r(\omega)/r(1)=0.251,\,0.502,\,0.751,\,1.000$.
 
 Throughout the relaxation the state stays isotropic (all $l\ge1$ amplitudes remain at $0$ to
 machine precision, so momentum is trivially conserved), and the total energy \eqref{eq:Teq} is
-conserved to $\sim3\times10^{-12}$ while its translational and internal parts each change by tens of
+conserved to a few times $10^{-12}$ while its translational and internal parts each change by tens of
 percent (Fig.~\ref{fig:relax_cons}); the mass row is pinned at the round-off floor.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.9\textwidth]{figures/fig_polyrelax_sweep_di.pdf}
-\caption{Relaxation for varying internal degrees of freedom $d_i$ ($\omega=1$). (a) $T_v$ (solid)
-and $T_I$ (dashed) converge to the predicted $T_{\mathrm{eq}}(d_i)$ of \eqref{eq:Teq} (dotted).
-(b) The temperature difference $|T_v-T_I|$ decays exponentially; larger $d_i$ relaxes faster.}
+\caption{Relaxation for varying internal degrees of freedom $d_i$ at $\omega=1$, $\zeta=0$, with
+the operator normalised to unit equilibrium collision frequency $\nu_0=1$. (a) $T_v$ (solid) and
+$T_I$ (dashed) converge to the rational equilibria $T_{\mathrm{eq}}(d_i)=(4+d_i)/(3+d_i)$ of
+\eqref{eq:Teq} (dotted, labelled at the right edge). (b) The temperature difference $|T_v-T_I|$
+decays exponentially at exactly the Landau--Teller rate \eqref{eq:LT} (black dashed);
+larger $d_i$ relaxes \emph{slower}, since $\lambda_{\mathrm{LT}}=(3+d_i)/(3+2d_i)$ decreases
+monotonically from $\tfrac57$ to $\tfrac7{11}$.}
 \label{fig:relax_di}
 \end{figure}
 
@@ -57,7 +82,7 @@ and $T_I$ (dashed) converge to the predicted $T_{\mathrm{eq}}(d_i)$ of \eqref{eq
 \centering
 \includegraphics[width=0.9\textwidth]{figures/fig_polyrelax_sweep_omega.pdf}
 \caption{Relaxation for varying DSMC weight $\omega$ at fixed $d_i=2$. (a) All $\omega$ reach the
-same $T_{\mathrm{eq}}=1.240$. (b) The semilog decay of $|T_v-T_I|$ has slope proportional to
+same $T_{\mathrm{eq}}=6/5$. (b) The semilog decay of $|T_v-T_I|$ has slope proportional to
 $\omega$ (measured rate $r$ in the legend), a direct consequence of the frozen channel being
 elastic.}
 \label{fig:relax_omega}
@@ -67,7 +92,7 @@ elastic.}
 \centering
 \includegraphics[width=0.62\textwidth]{figures/fig_polyrelax_conservation.pdf}
 \caption{Conservation during the $d_i=2,\ \omega=1$ run. Total energy drifts by only
-$\sim3\times10^{-12}$ (RK2 accumulation) and the mass row sits at the round-off floor, even though
+a few times $10^{-12}$ (RK2 accumulation) and the mass row sits at the round-off floor, even though
 $T_v$ and $T_I$ individually vary substantially.}
 \label{fig:relax_cons}
 \end{figure}
