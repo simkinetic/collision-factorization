@@ -27,7 +27,7 @@ export_to_pdf_figure = true;
 
 %% --- Global parameters (all tunable) ------------------------------------
 K_max = 2; L_max = 2; I_max = 2;
-rad_pad = 16; tan_pad = 16; int_pad = 24;
+rad_pad = 10; tan_pad = 10; int_pad = 10;
 zeta = 0.5;                 % s_visc = 0.75  ->  |u|^zeta
 % Initial temperatures. Keep the gap modest so the product-Maxwellian projects
 % cleanly at low K (Sonine truncation ~ ((T-1)/T)^K); T_v0=1.4 gives ~2% at K=2.
@@ -42,7 +42,7 @@ fprintf('Initial temperatures: T_v0=%.3f  T_I0=%.3f\n\n', T_v0, T_I0);
 %% ========================================================================
 %  SWEEP A: internal degrees of freedom d_i  (different equilibria)
 %  ========================================================================
-di_list = [2, 4, 6];
+di_list = [2, 3, 4];
 sweepA = struct('di',{},'t',{},'Tv',{},'Ti',{},'Teq_num',{},'rate',{});
 
 fprintf('--- Sweep A: internal DOF d_i (omega = 1) ---\n');
@@ -102,10 +102,20 @@ for b = 1:numel(omega_list)
         w, sweepB(b).Teq_num, sweepB(b).rate, sweepB(b).rate_ex);
 end
 
-% Representative case for the conservation figure (d_i=2, omega=1)
-Rcons = relax_two_temp(C_nf, Basis_B, calib_B, T_v0, T_I0, tgrid_B);
-fprintf('  Conservation (d_i=%g, omega=1): max|dMass|=%.2e  max|dE_total|=%.2e\n', ...
-    delta_B, max(abs(Rcons.mass - Rcons.mass(1))), max(abs(Rcons.E - Rcons.E(1))));
+% Conservation figure (d_i=2, omega=1). Two operators on the SAME grid/integrator:
+%   black -- the experiment's model (zeta=%.2f): |u|^zeta needs quadrature, so any
+%            drift here mixes RK2 error with quadrature error.
+%   red   -- a Maxwell control (zeta=0): the base-DSMC R-tensor is polynomial-exact,
+%            so this conserves to pure machine/RK2 precision. If black drifts ABOVE
+%            red, the excess is the |u|^zeta quadrature -- ruling out a quadrature bug.
+C_mx    = build_C(Basis_B, delta_B, 0.0, 1.0, rad_pad, tan_pad, int_pad);   % Maxwell control
+Rcons   = relax_two_temp(C_nf, Basis_B, calib_B, T_v0, T_I0, tgrid_B);      % black: zeta=0.5 model
+Rcons_mx= relax_two_temp(C_mx, Basis_B, calib_B, T_v0, T_I0, tgrid_B);      % red:  zeta=0 exact
+fprintf('  Conservation (d_i=%g, omega=1):\n', delta_B);
+fprintf('    model   (zeta=%.2f): max|dMass|=%.2e  max|dE_total|=%.2e\n', ...
+    zeta, max(abs(Rcons.mass - Rcons.mass(1))), max(abs(Rcons.E - Rcons.E(1))));
+fprintf('    Maxwell (zeta=0.00): max|dMass|=%.2e  max|dE_total|=%.2e  [quadrature-exact control]\n', ...
+    max(abs(Rcons_mx.mass - Rcons_mx.mass(1))), max(abs(Rcons_mx.E - Rcons_mx.E(1))));
 fprintf('\n');
 
 %% ========================================================================
@@ -116,12 +126,14 @@ fprintf('  %4s | %10s | %10s\n', 'd_i', 'T_eq_pred', 'T_eq_num');
 for a = 1:numel(sweepA)
     fprintf('  %4d | %10.4f | %10.4f\n', sweepA(a).di, Teq_of(sweepA(a).di), sweepA(a).Teq_num);
 end
-rate1 = sweepB(end).rate;   % omega = 1
-fprintf('\n=== Sweep B: decay rate vs omega (d_i=%g) -- rate should be ~proportional to omega ===\n', delta_B);
-fprintf('  %6s | %10s | %14s | %10s\n', 'omega', 'T_eq_num', 'rate_meas', 'rate/rate(1)');
+fprintf('\n=== Sweep B: decay rate vs omega (d_i=%g) -- rate proportional to omega ===\n', delta_B);
+fprintf('  (frozen channel is elastic -> leaves both energy modes invariant -> rate/omega is constant)\n');
+fprintf('  %6s | %10s | %12s | %12s | %12s | %12s\n', ...
+    'omega', 'T_eq_num', 'rate_fit', 'rate_eig', 'rate_fit/w', 'rate_eig/w');
 for b = 1:numel(sweepB)
-    fprintf('  %6.2f | %10.4f | %14.5f | %10.3f\n', ...
-        sweepB(b).omega, sweepB(b).Teq_num, sweepB(b).rate, sweepB(b).rate/rate1);
+    fprintf('  %6.2f | %10.4f | %12.5f | %12.5f | %12.5f | %12.5f\n', ...
+        sweepB(b).omega, sweepB(b).Teq_num, sweepB(b).rate, sweepB(b).rate_ex, ...
+        sweepB(b).rate/sweepB(b).omega, sweepB(b).rate_ex/sweepB(b).omega);
 end
 fprintf('\n');
 
@@ -149,6 +161,7 @@ xlabel('Time $t$','FontSize',FS_labels);
 ylabel('Temperature','FontSize',FS_labels);
 title('\textbf{(a) Relaxation to $T_{\mathrm{eq}}(d_i)$}','FontSize',FS_title);
 set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
+xlim([0 0.1]);                      % zoom on the informative decay window
 lg = arrayfun(@(s) sprintf('$d_i=%d$', s.di), sweepA, 'UniformOutput', false);
 % one representative pair for the legend semantics
 text(0.98,0.05,'solid: $T_v$\quad dashed: $T_I$\quad dotted: $T_{\mathrm{eq}}$', ...
@@ -156,12 +169,14 @@ text(0.98,0.05,'solid: $T_v$\quad dashed: $T_I$\quad dotted: $T_{\mathrm{eq}}$',
     'BackgroundColor',[1 1 1 0.7],'EdgeColor','k','Margin',3);
 
 subplot(1,2,2); hold on; grid on;
+set(gca,'YScale','log');
 h = gobjects(1,numel(sweepA));
 for a = 1:numel(sweepA)
     dT = max(abs(sweepA(a).Tv - sweepA(a).Ti), eps);
-    h(a) = semilogy(sweepA(a).t, dT, '-', 'Color', colA(a,:), 'LineWidth', 2);
+    h(a) = plot(sweepA(a).t, dT, '-', 'Color', colA(a,:), 'LineWidth', 2);
 end
-set(gca,'YScale','log','FontSize',FS_ticks,'LineWidth',1.1);
+set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
+xlim([0 0.1]); ylim([1e-3 1e0]);
 xlabel('Time $t$','FontSize',FS_labels);
 ylabel('$|T_v - T_I|$','FontSize',FS_labels);
 title('\textbf{(b) Exponential relaxation}','FontSize',FS_title);
@@ -184,45 +199,100 @@ xlabel('Time $t$','FontSize',FS_labels);
 ylabel('Temperature','FontSize',FS_labels);
 title(sprintf('\\textbf{(a) Same $T_{\\mathrm{eq}}=%.3f$ for all $\\omega$}', Teq_of(delta_B)),'FontSize',FS_title);
 set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
+xlim([0 0.25]);                     % zoom on the informative decay window
 text(0.98,0.05,'solid: $T_v$\quad dashed: $T_I$','Units','normalized', ...
     'HorizontalAlignment','right','FontSize',FS_legend, ...
     'BackgroundColor',[1 1 1 0.7],'EdgeColor','k','Margin',3);
 
 subplot(1,2,2); hold on; grid on;
+set(gca,'YScale','log');
 h = gobjects(1,numel(sweepB)); lgB = cell(1,numel(sweepB));
 for b = 1:numel(sweepB)
     dT = max(abs(sweepB(b).Tv - sweepB(b).Ti), eps);
-    h(b) = semilogy(sweepB(b).t, dT, '-', 'Color', colB(b,:), 'LineWidth', 2);
-    lgB{b} = sprintf('$\\omega=%.2f$ ($r=%.3f$)', sweepB(b).omega, sweepB(b).rate);
+    h(b) = plot(sweepB(b).t, dT, '-', 'Color', colB(b,:), 'LineWidth', 2);
+    lgB{b} = sprintf('$\\omega=%.2f$', sweepB(b).omega);
 end
-set(gca,'YScale','log','FontSize',FS_ticks,'LineWidth',1.1);
+set(gca,'FontSize',FS_ticks,'LineWidth',1.1);
+xlim([0 0.25]); ylim([1e-3 1e0]);
 xlabel('Time $t$','FontSize',FS_labels);
 ylabel('$|T_v - T_I|$','FontSize',FS_labels);
-title('\textbf{(b) Different rates, slope $\propto \omega$}','FontSize',FS_title);
+title('\textbf{(b) Slope $\propto \omega$}','FontSize',FS_title);
 legend(h, lgB, 'Location','northeast','FontSize',FS_legend);
 if export_to_pdf_figure
     exportgraphics(fig2, 'fig_polyrelax_sweep_omega.pdf', 'ContentType','vector');
 end
 
-% ---- Figure 3: conservation (representative case) -----------------------
-fig3 = figure('Name','Conservation','Position',[160 160 640 420],'Color','w');
+% ---- Figure 3: conservation -- model (black) vs Maxwell control (red) ----
+% Same integrator/grid for both; the Maxwell (zeta=0) operator is quadrature-exact,
+% so it isolates whether the model's tiny drift is quadrature or the RK2 stepper.
+fig3 = figure('Name','Conservation','Position',[160 160 700 440],'Color','w');
 hold on; grid on;
-mass_err = max(abs(Rcons.mass - Rcons.mass(1)), eps);
-E_err    = max(abs(Rcons.E    - Rcons.E(1)),    eps);
 sub = round(linspace(1, numel(Rcons.t), 12));
+mass_err = max(abs(Rcons.mass    - Rcons.mass(1)),    eps);
+E_err    = max(abs(Rcons.E       - Rcons.E(1)),       eps);
+mass_mx  = max(abs(Rcons_mx.mass - Rcons_mx.mass(1)), eps);
+E_mx     = max(abs(Rcons_mx.E    - Rcons_mx.E(1)),    eps);
 semilogy(Rcons.t, mass_err, 'k-o', 'LineWidth',2, 'MarkerSize',8, 'MarkerIndices',sub, ...
-    'DisplayName','Mass $|\Delta\rho|$');
+    'DisplayName',sprintf('Mass, model ($\\zeta=%.2f$)', zeta));
 semilogy(Rcons.t, E_err, 'k-s', 'LineWidth',2, 'MarkerSize',8, 'MarkerIndices',sub, ...
-    'DisplayName','Total energy $|\Delta E|$');
+    'DisplayName',sprintf('Energy, model ($\\zeta=%.2f$)', zeta));
+semilogy(Rcons_mx.t, mass_mx, 'r-o', 'LineWidth',2, 'MarkerSize',8, 'MarkerIndices',sub, ...
+    'DisplayName','Mass, Maxwell ($\zeta=0$)');
+semilogy(Rcons_mx.t, E_mx, 'r-s', 'LineWidth',2, 'MarkerSize',8, 'MarkerIndices',sub, ...
+    'DisplayName','Energy, Maxwell ($\zeta=0$)');
 set(gca,'YScale','log','FontSize',FS_ticks,'LineWidth',1.1);
-ylim([1e-18, 1e-10]); yticks(10.^(-18:2:-10));
+ylim([1e-18, 1e-8]); yticks(10.^(-18:2:-8));
 xlabel('Time $t$','FontSize',FS_labels);
 ylabel('Absolute drift','FontSize',FS_labels);
-title(sprintf('\\textbf{Conservation ($d_i=%g,\\ \\omega=1$)}', delta_B),'FontSize',FS_title);
+title(sprintf('\\textbf{Conservation ($d_i=%g,\\ \\omega=1$): model vs Maxwell control}', delta_B),'FontSize',FS_title);
 legend('Location','east','FontSize',FS_legend);
 if export_to_pdf_figure
     exportgraphics(fig3, 'fig_polyrelax_conservation.pdf', 'ContentType','vector');
 end
+
+%% ========================================================================
+%  SAVE RAW RESULTS (re-plotting + paper inclusion)
+%  ========================================================================
+outdir = fullfile('paper','figures');
+if ~exist(outdir,'dir'), mkdir(outdir); end
+
+params = struct('K_max',K_max,'L_max',L_max,'I_max',I_max, ...
+    'rad_pad',rad_pad,'tan_pad',tan_pad,'int_pad',int_pad, ...
+    'zeta',zeta,'T_v0',T_v0,'T_I0',T_I0, ...
+    'di_list',di_list,'omega_list',omega_list,'delta_B',delta_B);
+save(fullfile(outdir,'polyrelax_results.mat'), ...
+    'sweepA','sweepB','Rcons','Rcons_mx','params','-v7');
+
+% Sweep A: grids differ per case -> one CSV each
+for a = 1:numel(sweepA)
+    dT = abs(sweepA(a).Tv - sweepA(a).Ti);
+    Tb = table(sweepA(a).t(:), sweepA(a).Tv(:), sweepA(a).Ti(:), dT(:), ...
+        'VariableNames', {'t','Tv','Ti','absdT'});
+    writetable(Tb, fullfile(outdir, sprintf('polyrelax_A_di%d.csv', sweepA(a).di)));
+end
+
+% Sweep B: shared grid -> single wide CSV
+Bmat = sweepB(1).t(:);  names = {'t'};
+for b = 1:numel(sweepB)
+    dT = abs(sweepB(b).Tv - sweepB(b).Ti);
+    Bmat = [Bmat, sweepB(b).Tv(:), sweepB(b).Ti(:), dT(:)]; %#ok<AGROW>
+    ws = strrep(sprintf('%.2f', sweepB(b).omega), '.', 'p');
+    names = [names, {['Tv_w' ws], ['Ti_w' ws], ['absdT_w' ws]}]; %#ok<AGROW>
+end
+writetable(array2table(Bmat,'VariableNames',names), fullfile(outdir,'polyrelax_B.csv'));
+
+% Conservation: model vs Maxwell drift
+Cb = table(Rcons.t(:), abs(Rcons.mass-Rcons.mass(1)), abs(Rcons.E-Rcons.E(1)), ...
+    abs(Rcons_mx.mass-Rcons_mx.mass(1)), abs(Rcons_mx.E-Rcons_mx.E(1)), ...
+    'VariableNames', {'t','mass_model','E_model','mass_maxwell','E_maxwell'});
+writetable(Cb, fullfile(outdir,'polyrelax_conservation.csv'));
+
+% LaTeX summary table for the paper
+write_relaxation_table(fullfile('paper','table_temperature_relaxation.tex'), ...
+    sweepA, sweepB, Teq_of, delta_B);
+
+fprintf('Saved: %s, per-case CSVs in %s, and paper/table_temperature_relaxation.tex\n', ...
+    fullfile(outdir,'polyrelax_results.mat'), outdir);
 
 fprintf('Done.\n');
 
@@ -260,7 +330,7 @@ function calib = calibrate_temperature(Basis)
     %   <v^2> = 3*c000 + a1*c100 ,  <I> = (nu+1)*c000 + b1*c010.
     % a0=3, b0=nu+1 exact at equilibrium; a1,b1 from a single perturbed Maxwellian.
     nu = Basis.nu;
-    th = 1.2;
+    th = 1.2; % artificial perturbation to get a nonzero c100, c010 for calibration
     cv = project_product_maxwellian(th, 1.0, Basis);   % translationally warm
     ci = project_product_maxwellian(1.0, th,  Basis);  % internally warm
     idx = @(k,i,q) (k*Basis.N_I + i)*Basis.N_Q + q;
@@ -354,4 +424,31 @@ function rate = fit_rate(t, Tv, Ti)
     if nnz(win) < 5, rate = NaN; return; end
     p = polyfit(t(win), log(dT(win)), 1);
     rate = -p(1);
+end
+
+function write_relaxation_table(fname, sweepA, sweepB, Teq_of, delta_B)
+    % Two booktabs tabulars (Sweep A: T_eq vs d_i; Sweep B: rate vs omega) for the
+    % paper. Matches the hand-written paper/table_hydrodynamic_quantities.tex style.
+    fid = fopen(fname, 'w');
+    if fid < 0, warning('write_relaxation_table: cannot open %s', fname); return; end
+    fprintf(fid, '%% Auto-generated by benchmark_polyatomic_temperature_relaxation.m -- do not edit by hand.\n');
+    fprintf(fid, '%% Requires \\usepackage{booktabs}.  Sweep B fixed d_i = %g.\n', delta_B);
+    % Sweep A: equilibrium temperature vs internal DOF
+    fprintf(fid, '\\begin{tabular}{cccc}\n\\toprule\n');
+    fprintf(fid, '$d_i$ & $T_{\\mathrm{eq}}^{\\mathrm{pred}}$ & $T_{\\mathrm{eq}}^{\\mathrm{num}}$ & rate $r$ \\\\\n\\midrule\n');
+    for a = 1:numel(sweepA)
+        fprintf(fid, '%d & %.4f & %.4f & %.3f \\\\\n', ...
+            sweepA(a).di, Teq_of(sweepA(a).di), sweepA(a).Teq_num, sweepA(a).rate);
+    end
+    fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
+    % Sweep B: decay rate vs omega
+    fprintf(fid, '\\begin{tabular}{ccccc}\n\\toprule\n');
+    fprintf(fid, '$\\omega$ & $T_{\\mathrm{eq}}$ & $r_{\\mathrm{fit}}$ & $r_{\\mathrm{eig}}$ & $r_{\\mathrm{fit}}/\\omega$ \\\\\n\\midrule\n');
+    for b = 1:numel(sweepB)
+        fprintf(fid, '%.2f & %.4f & %.4f & %.4f & %.4f \\\\\n', ...
+            sweepB(b).omega, sweepB(b).Teq_num, sweepB(b).rate, sweepB(b).rate_ex, ...
+            sweepB(b).rate/sweepB(b).omega);
+    end
+    fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
+    fclose(fid);
 end
