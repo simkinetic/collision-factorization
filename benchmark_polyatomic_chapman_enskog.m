@@ -150,7 +150,6 @@ fprintf('  paper table  : %s\n', fullfile(datadir,'polyce_n2_convergence.tex'));
 if export_to_pdf_figure
     outpdf = fullfile(proj,'paper','figures','fig_polyce_convergence.pdf');
     plot_polyce_convergence(R, outpdf);
-    copyfile(outpdf, fullfile(proj,'fig_polyce_convergence.pdf'));
 end
 
 fprintf('\nDone.\n');

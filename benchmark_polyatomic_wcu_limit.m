@@ -177,6 +177,9 @@ mstyle = {'o','s','^','d','v','>','<','p','h'};   % marker per mode
 
 xa = [min(di_list)*0.7, max(di_list)*1.15];       % x-range
 
+outdir = fullfile('paper','figures');
+if ~exist(outdir,'dir'), mkdir(outdir); end
+
 fig = figure('Position', [100 100 1450 480], 'Color', 'w');
 
 % --- (a) each physical (k,l) mode -> its WCU value -----------------------
@@ -252,15 +255,12 @@ legend(hb, lb, 'Location','southeast', 'FontSize', FS_legend);
 
 ax_a.Toolbar.Visible = 'off';  ax_b.Toolbar.Visible = 'off';   % clean export
 if export_to_pdf_figure
-    exportgraphics(fig, 'fig_wcu_limit.pdf', 'ContentType', 'vector');
+    exportgraphics(fig, fullfile(outdir,'fig_wcu_limit.pdf'), 'ContentType', 'vector');
 end
 
 %% ========================================================================
 %  SAVE RAW RESULTS (re-plotting + paper inclusion)
 %  ========================================================================
-outdir = fullfile('paper','figures');
-if ~exist(outdir,'dir'), mkdir(outdir); end
-
 params = struct('K_max',K_max,'L_max',L_max,'I_max',I_max, ...
     'rad_pad',rad_pad,'tan_pad',tan_pad,'int_pad',int_pad, ...
     'zeta',0.0,'omega',1.0,'di_list',di_list);
@@ -280,10 +280,6 @@ writetable(Tb, fullfile(outdir,'wcu_limit.csv'));
 % at the two sweep extremes (matches the console summary).
 texfile = fullfile('paper','table_wcu_limit.tex');
 write_wcu_table(texfile, modes_kl, tgt, err_mode, conserved, di_list);
-
-if export_to_pdf_figure
-    copyfile('fig_wcu_limit.pdf', fullfile(outdir,'fig_wcu_limit.pdf'));
-end
 
 fprintf('\nSaved: %s, %s, %s%s\n', fullfile(outdir,'wcu_limit_results.mat'), ...
         fullfile(outdir,'wcu_limit.csv'), texfile, ...
