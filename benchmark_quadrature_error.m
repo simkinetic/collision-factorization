@@ -17,7 +17,11 @@ for a_idx = 1:2
     
     % Compute Reference (Pad = 64)
     fprintf('--- Alpha = %.1f: Reference (Pad=64) ---\n', alpha);
+    % Conservation enforcement is switched off throughout: it clamps the invariant
+    % rows to exactly zero in both the reference and the test builds, which would
+    % remove the cleanest quadrature-convergence indicator from the error metric.
     T_ref = GeneralCollisionTensor(Basis, Kernel);
+    T_ref.conserve_invariants = false;
     T_ref.generate_R_tensor_sumfac(64, 64);
     norm_ref = max(abs(T_ref.R_tensor(:)));
     
@@ -25,6 +29,7 @@ for a_idx = 1:2
     for i = 1:length(paddings)
         pad = paddings(i);
         T_obj = GeneralCollisionTensor(Basis, Kernel);
+        T_obj.conserve_invariants = false;
         T_obj.generate_R_tensor_sumfac(pad, pad);
         
         err = max(abs(T_obj.R_tensor(:) - T_ref.R_tensor(:))) / norm_ref;
