@@ -50,13 +50,18 @@ for g_idx = 1:length(gammas)
 
     % Over-resolved reference (same spatial nodes, deep internal quadrature)
     fprintf('--- gamma = %.1f: Reference (internal_pad = %d) ---\n', gamma, ref_internal_pad);
+    % Conservation enforcement is switched off throughout: it clamps the invariant
+    % rows to exactly zero in both the reference and the test builds, which would
+    % remove the cleanest quadrature-convergence indicator from the error metric.
     T_ref = GeneralCollisionTensor(Basis, Kernel);
+    T_ref.conserve_invariants = false;
     T_ref.generate_R_tensor_sumfac(spatial_pad, spatial_pad, ref_internal_pad);
     norm_ref = max(abs(T_ref.R_tensor(:)));
 
     for i = 1:length(internal_paddings)
         ip = internal_paddings(i);
         T_obj = GeneralCollisionTensor(Basis, Kernel);
+        T_obj.conserve_invariants = false;
         T_obj.generate_R_tensor_sumfac(spatial_pad, spatial_pad, ip);
 
         err = max(abs(T_obj.R_tensor(:) - T_ref.R_tensor(:))) / norm_ref;
