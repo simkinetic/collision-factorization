@@ -30,6 +30,14 @@ classdef GeneralCollisionTensor < handle
         % false -> legacy pointwise (algebraic) extended build via the base MEX.
         laplace_extended = false;
         laplace_Ns = 32;          % Gauss-Jacobi s-node count for the Laplace integral
+
+        % Exact enforcement of the 5 collision invariants (mass, 3x momentum, energy) on
+        % the test rows of R_tensor. Mass and momentum each occupy a single row and are
+        % zeroed outright; the total energy |v|^2 + I spans the (k=1,i=0,l=0)/(k=0,i=1,l=0)
+        % pair and is removed by orthogonal projection, which leaves the physical
+        % translational<->internal exchange mode untouched. See enforce_conservation.
+        % Set false to inspect the raw quadrature residual (benchmark_*quadrature_error).
+        conserve_invariants = true;
     end
     
     methods
@@ -309,6 +317,7 @@ classdef GeneralCollisionTensor < handle
                     obj.R_tensor = w * obj.Kernel.C_vhs * R_nf + ...
                                    (1 - w) * obj.Kernel.C_vhs_frozen * R_fr;
                 end
+                obj.enforce_conservation();
                 return;
             end
 
@@ -347,8 +356,60 @@ classdef GeneralCollisionTensor < handle
                 obj.R_tensor = call_mex(kernel_model);
             end
 
-            % Enforce Conservation
-            % (Update conservation logic for polyatomic cases as needed)
+            obj.enforce_conservation();
+        end
+
+        function enforce_conservation(obj)
+            % ENFORCE_CONSERVATION  Impose the 5 collision invariants exactly on R_tensor.
+            % The test (row) index of R_tensor is (k1, i1); the row's angular degree is
+            % l1 = L_triplets(t,1). Since assemble_full_tensor is linear in R_tensor with
+            % this same row index, constraining rows of R is exactly equivalent to
+            % constraining rows of the assembled operator C, at a fraction of the cost.
+            %
+            % Mass       -> row (k1=0, i1=0), l1 = 0
+            % Momentum   -> row (k1=0, i1=0), l1 = 1
+            % Energy     -> the basis is orthonormal w.r.t. e^{-|v|^2} I^nu e^{-I}, and
+            %   L_1^(1/2)(v^2) = 3/2 - v^2   =>  v^2 = 3/2   - sqrt(3/2)*psi_(1,0,0)
+            %   L_1^(nu)(I)    = nu+1 - I    =>  I   = (nu+1) - sqrt(nu+1)*psi_(0,1,0)
+            %   (both normalized by psi_(0,0,0)), so with the weight e^{-|v|^2} -- in which
+            %   |v|^2 IS the translational energy in units of kT -- the invariant
+            %   |v|^2 + I has row weights (a, b) = (sqrt(3/2), sqrt(nu+1)) on the pair
+            %   {(k1=1,i1=0), (k1=0,i1=1)} in the l1 = 0 channels. Conservation is the
+            %   single constraint a*row_(1,0) + b*row_(0,1) = 0, imposed by projecting that
+            %   2-vector of rows off the unit direction e = (a,b)/|(a,b)|. The orthogonal
+            %   complement carries the physical trans<->internal energy exchange
+            %   (Landau-Teller) mode and is left exactly as computed.
+            if ~obj.conserve_invariants || isempty(obj.R_tensor), return; end
+
+            l1 = obj.L_triplets(:, 1);
+
+            % Mass (l1=0) and momentum (l1=1) share the single row (k1=0, i1=0).
+            obj.R_tensor(1, :, :, 1, :, :, l1 == 0 | l1 == 1) = 0;
+
+            % Energy lives in the isotropic channels only.
+            if obj.K_test < 1, return; end          % no (k1=1) row in the test space
+            sel_e = (l1 == 0);
+
+            if obj.I_max == 0
+                % Monatomic: no internal row exists, the invariant is |v|^2 alone.
+                obj.R_tensor(2, :, :, 1, :, :, sel_e) = 0;
+            elseif obj.I_test >= 1
+                a = sqrt(3/2);   b = sqrt(obj.nu + 1);
+                n = hypot(a, b); ea = a / n;  eb = b / n;
+
+                E1 = obj.R_tensor(2, :, :, 1, :, :, sel_e);   % (k1=1, i1=0)
+                E2 = obj.R_tensor(1, :, :, 2, :, :, sel_e);   % (k1=0, i1=1)
+                P  = ea * E1 + eb * E2;                       % component along e
+                obj.R_tensor(2, :, :, 1, :, :, sel_e) = E1 - ea * P;
+                obj.R_tensor(1, :, :, 2, :, :, sel_e) = E2 - eb * P;
+            else
+                % I_max>=1 but I_test=0: the VMS test space cannot represent the internal
+                % energy row, so the constraint is not expressible there. Zeroing the
+                % translational row alone would destroy the physical trans->internal leak.
+                warning('GeneralCollisionTensor:EnergyNotEnforced', ...
+                    ['I_test=0 with I_max=%d: the energy invariant spans the internal ' ...
+                     'row and cannot be enforced in this test space; skipping.'], obj.I_max);
+            end
         end
 
         function Rc = laplace_correction(obj, aux_mex, km, zhat, nu_val, ...
