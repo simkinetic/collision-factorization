@@ -161,10 +161,19 @@ classdef Gauss
                 qr.w = mu_0 .* (V(1, :)').^2;
             end
             
-            % Affine mapping to [a, b]
+            % Affine mapping to [a, b]. The weight FUNCTION is rescaled along
+            % with the differential: under x = -1 + 2(t-a)/(b-a),
+            %   (1-x)^alpha (1+x)^beta dx
+            %     = ((b-a)/2)^(alpha+beta+1) * ((b-t)/s)^alpha ((t-a)/s)^beta dt,
+            %   s = (b-a)/2,
+            % so the mapped rule integrates f(t) (b-t)^alpha (t-a)^beta on
+            % [a,b] scaled to the unit-coefficient weight; the total mass on
+            % [0,1] is the exact Beta moment B(beta+1, alpha+1). (The previous
+            % convention scaled only by (b-a)/2, leaving a spurious
+            % 2^(alpha+beta) factor in every mapped mass.)
             if a ~= -1 || b ~= 1
                 qr.x = a + (b - a) * (qr.x + 1) / 2;
-                qr.w = qr.w * (b - a) / 2;
+                qr.w = qr.w * ((b - a) / 2)^(alpha + beta + 1);
             end
         end
 

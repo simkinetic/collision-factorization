@@ -118,12 +118,19 @@ classdef ScatteringKernel < handle
             obj.K_delta = 2.0 * gamma(obj.delta + 1.5) / (sqrt(pi) * gamma(obj.delta / 2.0)^2);
 
             % VHS rate constants (overall scale + frozen/non-frozen split).
-            % Default both to K_delta so the convex split is a pure omega blend.
+            % Non-frozen: C_vhs = K_delta pairs with the Borgnakke-Larsen
+            % partition-measure mass (K_delta * mass(H_delta) = 1 at zeta = 0,
+            % exactly, now that the Jacobi rules carry the true Beta masses),
+            % so the channel's elastic-limit equilibrium rate is 1 -- the
+            % monatomic VHS normalization of Djordjic et al. Frozen: the
+            % elastic channel has no partition integral, so C_vhs_frozen = 1
+            % gives it the SAME unit rate, keeping omega a pure composition
+            % parameter at fixed total collision rate (Djordjic's design).
             if isfield(p, 'C_vhs'), obj.C_vhs = double(p.C_vhs); else, obj.C_vhs = obj.K_delta; end
             if isfield(p, 'C_vhs_frozen')
                 obj.C_vhs_frozen = double(p.C_vhs_frozen);
             else
-                obj.C_vhs_frozen = obj.K_delta;
+                obj.C_vhs_frozen = 1.0;
             end
 
             % Extended-model internal-energy modulation (eq 43). Default 0 ->

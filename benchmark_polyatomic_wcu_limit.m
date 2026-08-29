@@ -177,7 +177,7 @@ mstyle = {'o','s','^','d','v','>','<','p','h'};   % marker per mode
 
 xa = [min(di_list)*0.7, max(di_list)*1.15];       % x-range
 
-outdir = fullfile('paper','figures');
+outdir = 'results';
 if ~exist(outdir,'dir'), mkdir(outdir); end
 
 fig = figure('Position', [100 100 1450 480], 'Color', 'w');
@@ -278,7 +278,7 @@ writetable(Tb, fullfile(outdir,'wcu_limit.csv'));
 
 % LaTeX booktabs table for the paper: per-mode WCU limit + convergence error
 % at the two sweep extremes (matches the console summary).
-texfile = fullfile('paper','table_wcu_limit.tex');
+texfile = fullfile(outdir,'table_wcu_limit.tex');
 write_wcu_table(texfile, modes_kl, tgt, err_mode, conserved, di_list);
 
 fprintf('\nSaved: %s, %s, %s%s\n', fullfile(outdir,'wcu_limit_results.mat'), ...

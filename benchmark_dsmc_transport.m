@@ -58,7 +58,8 @@ for g = 1:nG
     nm = gases{g,1}; delta = gases{g,2}; zeta = gases{g,3};
     Pr_meas = gases{g,4}; Pr_euc_p = gases{g,5}; Pr_frz_p = gases{g,6}; numu_t = gases{g,7};
     nu = delta/2 - 1;
-    rho = sqrt(5/(4*delta));                 % heat-flux moment ratio d_q/d_s
+    rho = sqrt(5/delta);                     % heat-flux moment ratio d_q/d_s = sqrt(5/delta):
+                                             % l=1 counterpart of the sqrt(3/delta) that fixes the l=0 energy invariant.
 
     Basis = SpectralBasis(K_max,L_max,I_max,nu);
     % Build non-frozen (omega=1) and frozen (omega=0) operators once each

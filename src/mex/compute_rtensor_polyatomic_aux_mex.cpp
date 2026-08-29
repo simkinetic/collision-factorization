@@ -114,6 +114,22 @@ struct Config {
     // Laguerre grids are passed in pre-rescaled (nu->nu+zhat, scale 1/(1+s)) from MATLAB.
     // s_laplace = 0 reproduces the base build exactly (e^0 = 1).
     double s_laplace;
+    // Frozen-channel e_tr^{zeta/2} weight of Djordjic eq. (43).  Default 0 =
+    // the factor is applied.  Set to 1 only to reproduce the eq. (53)
+    // DSMC-comparison form, whose frozen term is |u|^zeta * C^f_VHS * delta*delta
+    // with no e_tr weight (diagnostic / paper discussion only).
+    int frozen_no_etr;
+    // SPECTRAL frozen treatment.  e_tr^{zeta/2} = E_tr^{zeta/2} E^{-zeta/2}; the
+    // singular E^{-zeta/2} is resolved by the same auxiliary Laplace integral as
+    // the non-frozen modulation (caller supplies the s-node and the rescaled
+    // internal grids), leaving only the ENTIRE factor E_tr^{zeta/2} here.  That
+    // folds into the velocity power, taking the frozen rate to |u|^{2 zeta}:
+    //     B^f = (sqrt2 |u|)^zeta * ((1/2)|u|^2)^{zeta/2} / x^zeta = |u|^{2 zeta} / x^zeta,
+    // which is why the caller must pass the energy-axis generalized-Laguerre rule
+    // rekeyed from weight x^{zeta/2} e^{-x} to x^{zeta} e^{-x}: the desingularizing
+    // division is by x^{zeta}, not x^{zeta/2}.  When set, the pointwise e_tr factor
+    // below is skipped (it is being represented by the s-integral instead).
+    int frozen_spectral;
 
     const double *x_nodes, *W_x; int N_x;
     const double *u1_nodes, *W_u1; int N_u1;
@@ -447,7 +463,14 @@ inline void compute_frozen_inner(const Config& cfg, ThreadScratch& tb,
     double z_scat_x2 = u_x2 / u_mag2; double z_scat_z2 = u_z2 / u_mag2;
 
     double u_prime = u_mag;                       // elastic: |u'| = |u|
-    double B_val = std::pow(u_mag * std::sqrt(2.0), cfg.alpha) / std::pow(x_i, cfg.alpha / 2.0);
+    // Spectral frozen build carries the entire factor E_tr^{zeta/2} = ((1/2)|u|^2)^{zeta/2}
+    // in the velocity power and desingularizes by x^{zeta} against the rekeyed
+    // x^{zeta} e^{-x} Laguerre rule the caller supplies.  Both forms are
+    // x_i-independent by construction (|u| ~ sqrt(x_i)), as the base build is.
+    double B_val = cfg.frozen_spectral
+        ? std::pow(u_mag * std::sqrt(2.0), cfg.alpha)
+              * std::pow(0.5 * u_mag * u_mag, cfg.alpha / 2.0) / std::pow(x_i, cfg.alpha)
+        : std::pow(u_mag * std::sqrt(2.0), cfg.alpha) / std::pow(x_i, cfg.alpha / 2.0);
 
     for (int I_idx = 0; I_idx < cfg.N_I_nodes; ++I_idx) {
         double I_val = cfg.I_nodes[I_idx];
@@ -481,6 +504,28 @@ inline void compute_frozen_inner(const Config& cfg, ThreadScratch& tb,
                 double hf = 1.0 + cfg.eta_hat_f * ( std::pow(I_val / E, cfg.zeta_hat_f)
                                                   + std::pow(J_val / E, cfg.zeta_hat_f) );
                 factor *= hf;
+            }
+
+            // Eq. (43) frozen weight e_tr^{zeta/2}.  In a frozen collision the
+            // deltas fix e_tr = R' = R = (1/2)u^2 / E exactly, so eq. (43) puts
+            // the SAME R^{zeta/2} weight on both channels -- folded into the
+            // Jacobi R-weight (R_beta = 1/2 + zeta/2) on the non-frozen channel,
+            // evaluated at the collapsed point here.  Per-(I,J,u) scalar: it
+            // multiplies gain and loss alike, so the elastic collision still
+            // conserves mass, momentum and energy.  Identity at zeta = 0.
+            // I_val / J_val are the PHYSICAL internal energies at this s-node
+            // (MATLAB passes the sigma-scaled Laguerre nodes, i.e. the physical
+            // I of the substitution), so this pointwise weight is applied at the
+            // correct argument in both the base (s=0) and correction calls.
+            // frozen_no_etr == 1 drops it, recovering the eq. (53) DSMC form.
+            // frozen_spectral == 1 also skips it: there the weight is carried
+            // exactly by E_tr^{zeta/2} (in B_val) times the auxiliary Laplace
+            // representation of E^{-zeta/2} (the s-node and rescaled grids), so
+            // applying it pointwise here as well would double-count it.
+            if (!cfg.frozen_no_etr && !cfg.frozen_spectral) {
+                double E_tr = 0.5 * u_mag * u_mag;
+                double E    = E_tr + I_val + J_val;
+                factor *= std::pow(E_tr / E, cfg.alpha / 2.0);
             }
 
             double loss_weight = factor * 4.0 * M_PI;
@@ -687,8 +732,8 @@ inline void compute_patch2(const Config& cfg, int i, double x_i, ThreadScratch& 
 // MEX MAIN FUNCTION
 // ========================================================================
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
-    if (nrhs != 39 && nrhs != 40 && nrhs != 44 && nrhs != 45) {
-        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires 39 inputs (legacy), 40 (with kernel_model), 44 (with extended-model eta_hat/zeta_hat/eta_hat_f/zeta_hat_f), or 45 (with auxiliary Laplace s_laplace node).");
+    if (nrhs != 39 && nrhs != 40 && nrhs != 44 && nrhs != 45 && nrhs != 46 && nrhs != 47) {
+        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires 39 inputs (legacy), 40 (with kernel_model), 44 (with extended-model eta_hat/zeta_hat/eta_hat_f/zeta_hat_f), 45 (with auxiliary Laplace s_laplace node), 46 (adding the frozen_no_etr opt-out flag), or 47 (adding the frozen_spectral flag).");
     }
     
     Config cfg;
@@ -740,7 +785,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     // Auxiliary Laplace s-node (default 0 = base build). Used only by the correction builds:
     // pass the pre-rescaled internal/post grids and eta_hat=eta_hat_f=0 (the (I/E)^zhat is
     // realized by the rescaled grids + the e^{-s*(1/2)|u|^2} velocity factor, not pointwise).
-    cfg.s_laplace  = (nrhs == 45) ? mxGetScalar(prhs[44]) : 0.0;
+    cfg.s_laplace  = (nrhs >= 45) ? mxGetScalar(prhs[44]) : 0.0;
+
+    // Opt-out flag; absent => 0 => eq. (43) kernel (e_tr weight ON).
+    cfg.frozen_no_etr  = (nrhs >= 46) ? (int)mxGetScalar(prhs[45]) : 0;
+    // Spectral frozen treatment; absent => 0 => pointwise e_tr (diagnostic path).
+    cfg.frozen_spectral = (nrhs == 47) ? (int)mxGetScalar(prhs[46]) : 0;
 
     cfg.sum_WR = 0.0; for(int q=0; q<cfg.N_R_nodes; ++q) cfg.sum_WR += cfg.W_R[q];
     cfg.sum_Wr = 0.0; for(int q=0; q<cfg.N_r_nodes; ++q) cfg.sum_Wr += cfg.W_r[q];

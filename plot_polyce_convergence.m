@@ -2,8 +2,8 @@ function plot_polyce_convergence(R, outpdf)
 % PLOT_POLYCE_CONVERGENCE  Render the polyatomic Chapman-Enskog convergence
 % figure from saved results (decoupled from the expensive operator builds).
 %
-%   plot_polyce_convergence()            % load paper/data/polyce_results.mat,
-%                                        % write paper/figures/fig_polyce_convergence.pdf
+%   plot_polyce_convergence()            % load results/polyce_results.mat,
+%                                        % write results/fig_polyce_convergence.pdf
 %   plot_polyce_convergence(R)           % R struct (see benchmark) or a .mat path
 %   plot_polyce_convergence(R, outpdf)   % explicit output path
 %
@@ -11,13 +11,13 @@ function plot_polyce_convergence(R, outpdf)
 %           f_mu_pekeris, Pr_exp, numu_exp.
 
     if nargin < 1 || isempty(R)
-        R = fullfile('paper','data','polyce_results.mat');
+        R = fullfile('results','polyce_results.mat');
     end
     if ischar(R) || isstring(R)
         d = load(char(R));  R = d.R;
     end
     if nargin < 2 || isempty(outpdf)
-        outpdf = fullfile('paper','figures','fig_polyce_convergence.pdf');
+        outpdf = fullfile('results','fig_polyce_convergence.pdf');
     end
 
     c_nu = [0 0.447 0.741];    % nu/mu (blue)

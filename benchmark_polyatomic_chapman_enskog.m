@@ -139,16 +139,16 @@ R.f_mu_pekeris = f_mu_ref_inf;  R.Pr_exp = Pr_exp;  R.numu_exp = numu_exp;
 R.params = p_n2;  R.pad = pad;  R.I_max = I_max;  R.L_max = L_max;
 R.K_top = K_top;  R.K_top_ext = K_top_ext;  R.use_laplace = use_laplace;
 
-datadir = fullfile(proj,'paper','data');
+datadir = fullfile(proj,'results');
 if ~isfolder(datadir), mkdir(datadir); end
 matfile = fullfile(datadir,'polyce_results.mat');
 save(matfile,'R');
 fprintf('\n  results saved: %s\n', matfile);
 write_n2_table(fullfile(datadir,'polyce_n2_convergence.tex'), Sn2, An2, Pr_exp, numu_exp);
-fprintf('  paper table  : %s\n', fullfile(datadir,'polyce_n2_convergence.tex'));
+fprintf('  LaTeX table  : %s\n', fullfile(datadir,'polyce_n2_convergence.tex'));
 
 if export_to_pdf_figure
-    outpdf = fullfile(proj,'paper','figures','fig_polyce_convergence.pdf');
+    outpdf = fullfile(proj,'results','fig_polyce_convergence.pdf');
     plot_polyce_convergence(R, outpdf);
 end
 
@@ -160,7 +160,9 @@ function S = ce_sweep(J, Basis, delta, K_top)
 % truncation kk = 0..K_top by block-inversion / Schur reduction of J.
     N_I = Basis.I_max + 1;  N_Q = (Basis.L_max + 1)^2;  Imax = Basis.I_max;
     idx = @(k,i,l,m) (k*N_I+i)*N_Q + (l^2+l+m) + 1;
-    rho = sqrt(5/(4*delta));
+    % rho = d_q/d_s = sqrt(5/delta): l=1 heat-flux moment ratio, counterpart of
+    % the sqrt(3/delta) that fixes the l=0 energy invariant.
+    rho = sqrt(5/delta);
     kks = 0:K_top;  n = numel(kks);
     [f_mu, lam_sh, P_Pi, numu, Pr] = deal(nan(1,n));
     nullc = zeros(n,3);                     % [L=2  L=0  L=1] near-zero eigencounts
@@ -301,7 +303,9 @@ function A = ce_anchor(J, Basis, delta)
     N_I = Basis.I_max + 1;  N_Q = (Basis.L_max + 1)^2;
     A.f_mu = 1.0;
     A.numu = bulkshear(J, delta, N_I, N_Q);
-    A.Pr   = prandtl(J, delta, sqrt(5/(4*delta)), N_I, N_Q);
+    % rho = d_q/d_s = sqrt(5/delta): l=1 heat-flux moment ratio, counterpart of
+    % the sqrt(3/delta) that fixes the l=0 energy invariant.
+    A.Pr   = prandtl(J, delta, sqrt(5/delta), N_I, N_Q);
 end
 
 function Pr = prandtl(J, delta, rho, N_I, N_Q)

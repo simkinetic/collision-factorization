@@ -28,7 +28,13 @@ classdef GeneralCollisionTensor < handle
         % resolved by the auxiliary Laplace s-integral E^{-zhat}=1/Gamma(zhat) int s^{zhat-1}
         % e^{-sE} ds (compute_rtensor_polyatomic_aux_mex), restoring spectral convergence.
         % false -> legacy pointwise (algebraic) extended build via the base MEX.
-        laplace_extended = false;
+        % Default true: the auxiliary-Laplace s-integral gives spectral accuracy
+        % for energy-coupled/extended kernels (eta_hat ~= 0), where the pointwise
+        % algebraic (I/E)^zhat evaluation converges only algebraically. For pure
+        % base kernels (eta_hat = eta_hat_f = 0) the correction term vanishes and
+        % the two paths agree to machine precision. Set false to opt out for
+        % comparison studies (the algebraic pointwise path).
+        laplace_extended = true;
         laplace_Ns = 32;          % Gauss-Jacobi s-node count for the Laplace integral
 
         % Exact enforcement of the 5 collision invariants (mass, 3x momentum, energy) on
@@ -38,6 +44,72 @@ classdef GeneralCollisionTensor < handle
         % translational<->internal exchange mode untouched. See enforce_conservation.
         % Set false to inspect the raw quadrature residual (benchmark_*quadrature_error).
         conserve_invariants = true;
+
+        % Hard structural constraint (Rene, 2026-08-17): on the SPECTRAL /
+        % production path (laplace_extended && DSMC) the four internal-sector
+        % directions (I, J, r, R) are EXACT by polynomial degree at the
+        % Table-1 node counts: base branches against the native weights,
+        % modulated branches via the shifted-Jacobi prefactor rules, frozen
+        % branches via the frozen-spectral auxiliary treatment. Requested
+        % internal padding is dead weight there and is clamped to zero (one
+        % warning per session; the effective values are recorded in
+        % effective_padding). The algebraic/pointwise diagnostic paths keep
+        % the padding knob untouched -- there internal padding IS the
+        % convergence mechanism. N_lambda (laplace_Ns) is a separate,
+        % geometric knob and is never clamped.
+        % Default true since 2026-08-18: the overnight confirmation sweeps
+        % measured int_pad 0 == int_pad 8 at <= 2e-14 on all four spectral
+        % branches (nf base, nf modulated post-shift, frozen base, frozen
+        % modulated), and the full int_pad sweeps are flat at the roundoff
+        % floor from the minimum Table-1 counts. Set false only to reproduce
+        % pre-constraint builds in diagnostics.
+        clamp_internal_pad = true;
+
+        % Effective (post-clamp) paddings of the last generate_R_tensor_sumfac
+        % call: struct with fields radial, angular, internal_requested,
+        % internal_effective. Cache writers and logs must record
+        % internal_effective, never the request, so filenames and contents
+        % cannot diverge.
+        effective_padding = struct();
+
+        % DIAGNOSTIC OPT-OUT -- leave false for all production work.
+        % Production (false) builds the DSMC frozen channel of Djordjic's
+        % EXTENDED model, eq. (43), whose frozen term carries the weight
+        % (e_tr)^{zeta/2}. The deltas fix e_tr = R' = R = (1/2)|u|^2/E, so
+        % eq. (43) is uniformly |u|^zeta R^{zeta/2}[...] on both channels: the
+        % non-frozen one folds R^{zeta/2} into the Jacobi R-weight, the frozen
+        % one evaluates it at the collapsed point. Eq. (43) is the model whose
+        % parameters Djordjic's Sect. 9 (Table 4) transport fits use.
+        % Set true to recover the eq. (53) DSMC-comparison form of Sect. 8,
+        % whose frozen term is |u|^zeta C^f_VHS delta delta with no e_tr weight.
+        % Dropping the weight over-weights the frozen channel by 1/<R^{zeta/2}>
+        % (~1.3 at these zeta), which biases the bulk-to-shear ratio high; the
+        % opt-out exists only so that comparison stays reproducible.
+        % Exactly a no-op at zeta = 0 and at I_max = 0 (there E = E_tr, e_tr = 1).
+        frozen_no_etr = false;
+
+        % DIAGNOSTIC BUILD MODE -- leave false for all production work.
+        % When true, the gain (post-collision redistribution) kernels are zeroed
+        % before the R-tensor MEX contractions, so the build returns the LOSS-ONLY
+        % operator -Q^-(f, f) instead of the full Q = Q^+ - Q^-. This exists so
+        % that the equilibrium collision frequency nu_0 can be measured
+        % INDEPENDENTLY of the shear eigenvalue, rather than being defined from it
+        % (as the normalization in benchmark_polyatomic_wcu_limit.m and
+        % benchmark_polyatomic_temperature_relaxation.m does, which is fine for a
+        % normalizer but circular as a verification of lambda_shear = -nu_0/2).
+        % At zeta = 0 the loss term is exactly nu_0 f, so the linearized loss-only
+        % operator is -nu_0 I on every non-density mode and nu_0 can be read off
+        % its diagonal. See benchmark_polyatomic_shear_rate.m (paper Sect. 5.2).
+        %
+        % The flag is consumed at exactly one point (just before the MEX calls in
+        % generate_R_tensor_sumfac), so it covers BOTH the spectral/auxiliary
+        % Laplace path and the algebraic base path. It has no effect at all when
+        % false: the default build path is byte-identical to before this flag existed.
+        %
+        % NOTE: the loss operator does not conserve momentum or energy on its own,
+        % so set conserve_invariants = false alongside it -- otherwise the
+        % invariant projection will zero/rotate exactly the rows being measured.
+        loss_only = false;
     end
     
     methods
@@ -120,6 +192,34 @@ classdef GeneralCollisionTensor < handle
                 eta_hat = 0.0; zeta_hat = 0.0; eta_hat_f = 0.0; zeta_hat_f = 0.0;
             end
             
+            % Internal-sector padding clamp (see the clamp_internal_pad
+            % property). On the spectral path -- exactly the builds that the
+            % `if obj.laplace_extended && is_dsmc` branch below routes through
+            % the auxiliary MEX -- every internal-sector integrand (I, J, r, R)
+            % is polynomial against its constructed weight, so the Table-1
+            % node counts are EXACT and padding is dead weight: clamp it.
+            % Spatial/energy paddings are untouched (still required), as is
+            % N_lambda (geometric, separate knob), as is the algebraic path
+            % (padding is its convergence mechanism).
+            persistent clamp_warned
+            internal_pad_req = internal_pad;
+            if obj.clamp_internal_pad && obj.laplace_extended && is_dsmc && internal_pad > 0
+                if isempty(clamp_warned)
+                    warning('GeneralCollisionTensor:InternalPadClamped', ...
+                        ['Spectral path: the internal-sector axes (I, J, r, R) ' ...
+                         'are exact at the Table-1 node counts; the requested ' ...
+                         'internal padding %d is clamped to 0 (dead weight). ' ...
+                         'Printed once per session; the effective values are ' ...
+                         'in the effective_padding property.'], internal_pad);
+                    clamp_warned = true;
+                end
+                internal_pad = 0;
+            end
+            obj.effective_padding = struct( ...
+                'radial', radial_pad, 'angular', angular_pad, ...
+                'internal_requested', internal_pad_req, ...
+                'internal_effective', internal_pad);
+
             % 1. EXACT SPATIAL GRID SIZING (with padding)
             N_x = radial_pad + ceil((3 * obj.K_max + 1.5 * obj.L_max + 3) / 2.0);
             N_u1 = radial_pad + 4 * obj.K_max + 3 * obj.L_max + 4;
@@ -151,17 +251,54 @@ classdef GeneralCollisionTensor < handle
             W_eps = (2*pi/N_eps) * ones(N_eps, 1);
             
             % Polyatomic 1D Grids (Laguerre and Jacobi)
-            qr_I = Gauss.generalized_laguerre(N_I_nodes, nu_val);
-            I_nodes = qr_I.x; W_I = qr_I.w;
-            
-            qr_J = Gauss.generalized_laguerre(N_J_nodes, nu_val);
-            J_nodes = qr_J.x; W_J = qr_J.w;
-            
-            qr_r = Gauss.jacobi(N_r_nodes, nu_val, nu_val, 0, 1);
-            r_nodes = qr_r.x; W_r = qr_r.w;
-            
-            qr_R = Gauss.jacobi(N_R_nodes, 2*nu_val + 1, R_beta, 0, 1);
-            R_nodes = qr_R.x; W_R = qr_R.w;
+            if obj.I_max == 0
+                % ---- Monatomic (Dirac) collapse --------------------------------
+                % With no internal resolution the intended semantics is the
+                % monatomic limit d_i -> 0, where the internal equilibrium
+                % I^nu e^{-I}/Gamma(nu+1) concentrates onto delta(I). Single-node
+                % rules reproduce that Dirac distribution exactly:
+                %   I = J = 0  with weight Gamma(nu+1) (the full measure mass, so
+                %              the i=0 basis norm 1/sqrt(Gamma(nu+1)) still gives
+                %              exact orthonormality);
+                %   R = 1      (all collision energy stays kinetic: |u'| = |u|,
+                %              the elastic monatomic collision);
+                %   r = 1/2    (irrelevant: I' = r(1-R)E = 0 at R = 1);
+                % with unit partition masses W_r = W_R = 1, so the (r,R) integral
+                % is the identity in both the gain and the loss term (the MEX loss
+                % kernel is sum_WR*sum_Wr). The polyatomic build then reproduces
+                % the monatomic operator exactly. Finite-nu Gauss-Laguerre nodes
+                % here would instead put quadrature mass at I,J > 0 and let the
+                % partition redistribute kinetic <-> internal energy: the WCU
+                % spectrum regression of the strict I_max = 0 truncation that
+                % this branch removes.
+                % The collapsed weights carry the TOTAL MASS of each measure in
+                % the code's own normalization (a 1-node Gauss rule integrates
+                % constants exactly, so its weight IS that mass): Gamma(nu+1)
+                % for the internal Laguerre axes and the (r,R) Jacobi masses for
+                % the partition axes. This is the honest Dirac collapse
+                % int f dmu -> f(x*) mu_total, and keeps rates continuous with
+                % the I_max > 0 build (for DSMC, C_vhs = K_delta pairs with the
+                % partition mass: K_delta * mass(H_delta) = 1 at zeta = 0, so
+                % the non-frozen channel reduces to the monatomic VHS rate).
+                qm_r = Gauss.jacobi(1, nu_val, nu_val, 0, 1);
+                qm_R = Gauss.jacobi(1, 2*nu_val + 1, R_beta, 0, 1);
+                I_nodes = 0;   W_I = gamma(nu_val + 1);
+                J_nodes = 0;   W_J = gamma(nu_val + 1);
+                r_nodes = 0.5; W_r = sum(qm_r.w);
+                R_nodes = 1.0; W_R = sum(qm_R.w);
+            else
+                qr_I = Gauss.generalized_laguerre(N_I_nodes, nu_val);
+                I_nodes = qr_I.x; W_I = qr_I.w;
+
+                qr_J = Gauss.generalized_laguerre(N_J_nodes, nu_val);
+                J_nodes = qr_J.x; W_J = qr_J.w;
+
+                qr_r = Gauss.jacobi(N_r_nodes, nu_val, nu_val, 0, 1);
+                r_nodes = qr_r.x; W_r = qr_r.w;
+
+                qr_R = Gauss.jacobi(N_R_nodes, 2*nu_val + 1, R_beta, 0, 1);
+                R_nodes = qr_R.x; W_R = qr_R.w;
+            end
             
             K_test_val = obj.K_test;
             N_K_rad = max(N_K, K_test_val + 1);
@@ -275,6 +412,16 @@ classdef GeneralCollisionTensor < handle
             
             obj.L_triplets = L_triplets;
 
+            % Loss-only diagnostic build (see the loss_only property). Zeroing the
+            % gain kernels here -- after the Gaunt/SCALE assembly and before every
+            % MEX call site below -- removes Q^+ from both the spectral (auxiliary
+            % Laplace) and the algebraic base paths with one guard. Inert by default.
+            if obj.loss_only
+                P_gain_p1(:) = 0;
+                P_gain_p2(:) = 0;
+                fprintf('  [loss_only] gain kernels zeroed -> LOSS-ONLY operator.\n');
+            end
+
             % ---- Spectral extended-model build via the auxiliary Laplace s-integral ----
             % Resolves the singular factor (I/E)^zhat (E = 1/2|u|^2 + I + J) by
             %   E^{-zhat} = 1/Gamma(zhat) int_0^inf s^{zhat-1} e^{-sE} ds .
@@ -283,30 +430,71 @@ classdef GeneralCollisionTensor < handle
             % I^zhat) and scaled (sigma = 1/(1+s)); the (r(1-R))^zhat post weighting
             % (non-frozen) folds into the r/R weights. See laplace_correction.
             if obj.laplace_extended && is_dsmc
-                aux_mex = @(km, In, WIn, Jn, WJn, rn, Wrn, Rn, WRn, s_lap) ...
+                mk_aux = @(xn, Wxn, fspec) @(km, In, WIn, Jn, WJn, rn, Wrn, Rn, WRn, s_lap) ...
                     compute_rtensor_polyatomic_aux_mex( ...
                         obj.K_max, obj.I_max, N_L, N_Q, alpha_kernel, nu_val, ...
-                        x_nodes, W_x, u1_nodes, W_u1, t1_nodes, W_t1, ...
+                        xn, Wxn, u1_nodes, W_u1, t1_nodes, W_t1, ...
                         y2_nodes, W_y2, t2_nodes, W_t2, mu_chi, W_chi, eps_vec, W_eps, ...
                         In, WIn, Jn, WJn, rn, Wrn, Rn, WRn, ...
                         RadialNorm, InternalNorm, SH_Norm, L_triplets, qi_valid_mat, ...
                         P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2, ...
-                        K_test_val, I_test_val, km, 0.0, 0.0, 0.0, 0.0, s_lap);
+                        K_test_val, I_test_val, km, 0.0, 0.0, 0.0, 0.0, s_lap, ...
+                        double(obj.frozen_no_etr), double(fspec));
+                aux_mex = mk_aux(x_nodes, W_x, 0);
+
+                % Spectral frozen channel (see frozen_laplace_correction). It needs
+                % the energy axis rekeyed to weight x^zeta e^{-x}, because carrying
+                % E_tr^{zeta/2} in the velocity power takes the frozen rate to
+                % |u|^{2 zeta} and the desingularization to /x^zeta.
+                % Inert cases where NO auxiliary integral is admissible or needed:
+                %   alpha == 0     -> e_tr^0 == 1 identically (and Gamma(0) diverges);
+                %   I_max == 0     -> the Dirac collapse gives E = E_tr, so e_tr == 1.
+                %     The collapse is not a Gauss rule in I, so the sigma^{2nu+2}
+                %     bookkeeping the Jacobi weight encodes does not apply there;
+                %     the guard is required for CORRECTNESS, not just for speed.
+                use_frozen_lap = ~obj.frozen_no_etr && alpha_kernel > 0 && obj.I_max > 0;
+                if use_frozen_lap
+                    qx_fr = Gauss.generalized_laguerre(N_x, alpha_kernel);
+                    aux_fr = mk_aux(qx_fr.x, qx_fr.w, 1);
+                end
 
                 w = obj.Kernel.omega;
                 R_nf = []; R_fr = [];
+                % Monatomic (I_max == 0) Dirac collapse: the modulation factors
+                % (r(1-R) i)^{zhat/2} and i^{zhat_f} vanish identically (i = I/E = 0
+                % at the collapsed node I = 0), so the extended-model corrections are
+                % exactly zero. laplace_correction must NOT run there: it builds its
+                % own finite-nu multi-node Laguerre rules (ignoring the collapsed
+                % single-node grids), which would put quadrature mass at I, J > 0 and
+                % add a spurious nonzero correction. Same rationale as the I_max > 0
+                % requirement in use_frozen_lap above; the pointwise MEX paths get
+                % this right automatically (pow(0/E, zhat) = 0).
+                use_corr = obj.I_max > 0;
                 if w > 0
                     R_nf = aux_mex(1, I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, 0.0);
-                    if eta_hat ~= 0.0
+                    if eta_hat ~= 0.0 && use_corr
                         R_nf = R_nf + eta_hat * obj.laplace_correction(aux_mex, 1, ...
                             zeta_hat/2.0, nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
                     end
                 end
                 if w < 1
-                    R_fr = aux_mex(2, I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, 0.0);
-                    if eta_hat_f ~= 0.0
-                        R_fr = R_fr + eta_hat_f * obj.laplace_correction(aux_mex, 2, ...
-                            zeta_hat_f, nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                    if use_frozen_lap
+                        % Base frozen term: e_tr^{zeta/2} alone -> auxiliary exponent zeta/2.
+                        R_fr = obj.frozen_laplace_correction(aux_fr, true, 0.0, alpha_kernel, ...
+                            nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                        if eta_hat_f ~= 0.0
+                            % Modulated term: e_tr^{zeta/2} (I/E)^{zhat_f} shares ONE
+                            % fractional power of E, exponent zeta/2 + zhat_f.
+                            R_fr = R_fr + eta_hat_f * obj.frozen_laplace_correction( ...
+                                aux_fr, false, zeta_hat_f, alpha_kernel, ...
+                                nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                        end
+                    else
+                        R_fr = aux_mex(2, I_nodes, W_I, J_nodes, W_J, r_nodes, W_r, R_nodes, W_R, 0.0);
+                        if eta_hat_f ~= 0.0 && use_corr   % see the Dirac-collapse note above
+                            R_fr = R_fr + eta_hat_f * obj.laplace_correction(aux_mex, 2, ...
+                                zeta_hat_f, nu_val, N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R);
+                        end
                     end
                 end
                 if w == 0
@@ -324,7 +512,8 @@ classdef GeneralCollisionTensor < handle
             % Call the Polyatomic MEX. The trailing argument selects the kernel:
             %   0 = legacy polyatomic additive Grad kernel
             %   1 = DSMC non-frozen channel  B^nf = (sqrt2 u)^zeta, R^(zeta/2) in W_R
-            %   2 = DSMC frozen (elastic) channel B^f = (sqrt2 u)^zeta, I'=I, J'=J
+            %   2 = DSMC frozen (elastic) channel B^f = (sqrt2 u)^zeta e_tr^{zeta/2},
+            %       I'=I, J'=J  (eq. 43; e_tr = (1/2)|u|^2/E dropped iff frozen_no_etr)
             % The four trailing args carry the extended-model (eq 43) modulation:
             % non-frozen uses (eta_hat, zeta_hat); frozen uses (eta_hat_f, zeta_hat_f).
             call_mex = @(km) compute_rtensor_polyatomic_sumfac_mex( ...
@@ -335,7 +524,8 @@ classdef GeneralCollisionTensor < handle
                 RadialNorm, InternalNorm, SH_Norm, L_triplets, qi_valid_mat, ...
                 P_loss_p1, P_gain_p1, P_loss_p2, P_gain_p2, ...
                 K_test_val, I_test_val, km, ...
-                eta_hat, zeta_hat, eta_hat_f, zeta_hat_f);
+                eta_hat, zeta_hat, eta_hat_f, zeta_hat_f, ...
+                double(obj.frozen_no_etr));
 
             if is_dsmc
                 % Convex split: R_total = omega*C_vhs*R_nonfrozen + (1-omega)*C_vhs_frozen*R_frozen.
@@ -412,6 +602,84 @@ classdef GeneralCollisionTensor < handle
             end
         end
 
+        function Rc = frozen_laplace_correction(obj, aux_fr, is_base, zhat_f, alpha, nu_val, ...
+                                                N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R)
+            % FROZEN_LAPLACE_CORRECTION  Spectral frozen channel of Djordjic eq. (43).
+            %
+            % The frozen kernel is  B^f = |u|^zeta e_tr^{zeta/2} [1 + ehat_f(i^zf + i*^zf)],
+            % e_tr = E_tr/E, E = E_tr + I + I*, E_tr = (1/2)|u|^2.  Both the base and
+            % the modulated term are a single fractional power of E:
+            %     base       : E_tr^{zeta/2}            E^{-zeta/2}          (zhat_f = 0)
+            %     modulated  : E_tr^{zeta/2} I^{zhat_f} E^{-(zeta/2+zhat_f)}
+            % so ONE auxiliary integral at exponent p = zeta/2 + zhat_f covers both
+            % couplings at once -- they are not nested.
+            %     E^{-p} = 1/Gamma(p) int_0^inf lam^{p-1} e^{-lam E} dlam,
+            % and e^{-lam E} = e^{-lam E_tr} e^{-lam I} e^{-lam I*} factorizes per axis:
+            %   * e^{-lam E_tr} is ENTIRE and applied pointwise on the unchanged
+            %     velocity grid by the MEX (s_lap);
+            %   * e^{-lam I}, e^{-lam I*} rescale the internal Gauss-Laguerre nodes by
+            %     sigma = 1/(1+lam), each contributing sigma^{nu+1} (sigma^{nu+zhat_f+1}
+            %     on the zhat_f-shifted axis, which also holds the I^{zhat_f});
+            %   * E_tr^{zeta/2} folds into the velocity power (see aux MEX
+            %     frozen_spectral), which is why aux_fr carries the rekeyed
+            %     x^{zeta} e^{-x} energy rule.
+            % Substituting xi = lam/(1+lam) on [0,1] (dlam = dxi/(1-xi)^2) collects
+            %     (1-xi)^{-(p-1)} * (1-xi)^{2 nu + zhat_f + 2} * (1-xi)^{-2}
+            % and the zhat_f cancels against p, leaving in BOTH cases the Gauss-Jacobi
+            % weight
+            %     (1 - xi)^{2 nu + 1 - zeta/2}  xi^{p - 1},
+            % with total mass B(p, 2 nu + 2 - zeta/2).  Only the xi exponent depends on
+            % zhat_f.  Integrability needs 2 nu + 2 > zeta/2, i.e. zeta < 2 delta.
+            %
+            % The internal axes are left with nothing but polynomials times their own
+            % Laguerre weight, so the internal quadrature is EXACT again -- the point of
+            % the construction.  Unlike the non-frozen channel there is no (r,R)
+            % partition to reweight: the deltas collapsed it.
+            Ns = obj.laplace_Ns;
+            p  = alpha/2 + zhat_f;
+
+            a_exp = 2*nu_val + 1 - alpha/2;         % (1-xi) exponent
+            if a_exp <= -1
+                error('GeneralCollisionTensor:FrozenLaplaceNotIntegrable', ...
+                    ['Frozen auxiliary rule needs 2*nu+2 > zeta/2 (zeta < 2*delta); ' ...
+                     'got nu=%g, zeta=%g.'], nu_val, alpha);
+            end
+            qj  = Gauss.jacobi(Ns, a_exp, p - 1, 0, 1);
+            xik = qj.x;  wxi = qj.w;
+            Bmom = exp(gammaln(p) + gammaln(2*nu_val + 2 - alpha/2) ...
+                       - gammaln(p + 2*nu_val + 2 - alpha/2));
+            wxi = wxi * (Bmom / sum(wxi));          % no-op safeguard, as non-frozen
+
+            % Internal base rules.  Two INDEPENDENT questions, which must not be
+            % conflated:
+            %   * does the active axis need the shifted rule GL(nu+zhat_f)?  Only
+            %     when zhat_f ~= 0 -- and GL(nu+0) = GL(nu), so simply always using
+            %     the shifted rule is correct and degenerates cleanly.
+            %   * how many channels are summed?  The BASE term (is_base) is a single
+            %     integral; the MODULATED term is (i^zhat_f + i*^zhat_f), always TWO
+            %     channels -- including at zhat_f = 0, where i^0 + i*^0 = 2 and the
+            %     two identical channels must still both be counted.
+            % Keying the channel count off zhat_f instead of is_base silently halved
+            % the correction for the legal kernel (eta_hat_f ~= 0, zeta_hat_f = 0).
+            qP = Gauss.generalized_laguerre(N_J_nodes, nu_val);            tP = qP.x;  wP = qP.w;
+            qS = Gauss.generalized_laguerre(N_I_nodes, nu_val + zhat_f);   tS = qS.x;  wS = qS.w;
+
+            Rc = 0;
+            for k = 1:Ns
+                xi = xik(k);  lam = xi / (1 - xi);  sig = 1 - xi;
+                In_S = tS * sig;  In_P = tP * sig;   % scale nodes; weights unscaled
+                if is_base
+                    Rc = Rc + wxi(k) * ...
+                        aux_fr(2, In_S, wS, In_P, wP, r_nodes, W_r, R_nodes, W_R, lam);
+                else
+                    Rc = Rc + wxi(k) * ( ...
+                        aux_fr(2, In_S, wS, In_P, wP, r_nodes, W_r, R_nodes, W_R, lam) + ...
+                        aux_fr(2, In_P, wP, In_S, wS, r_nodes, W_r, R_nodes, W_R, lam) );
+                end
+            end
+            Rc = Rc / gamma(p);
+        end
+
         function Rc = laplace_correction(obj, aux_mex, km, zhat, nu_val, ...
                                          N_I_nodes, N_J_nodes, r_nodes, W_r, R_nodes, W_R)
             % LAPLACE_CORRECTION  eta-coefficient correction tensor for the extended model.
@@ -423,12 +691,14 @@ classdef GeneralCollisionTensor < handle
             % the I^zhat (resp. J^zhat) endpoint is held by a shifted GL(nu+zhat) rule, and the
             % velocity e^{-s|u|^2/2} is applied inside the MEX (s_lap). Internal weights are NOT
             % rescaled by sigma-powers -- those are absorbed by the (1-t)^{2nu+1} Jacobi weight.
-            % For the non-frozen channel (km==1) the post (r(1-R))^zhat / ((1-r)(1-R))^zhat
-            % weighting folds into the passed r/R weights. I- and J-channels are both summed.
+            % For the non-frozen channel (km==1) the bounded partition prefactors
+            % (r(1-R))^zhat / ((1-r)(1-R))^zhat fold into SHIFTED Gauss-Jacobi rules
+            % per active channel (see below). I- and J-channels are both summed.
             Ns = obj.laplace_Ns;
 
-            % s-grid: Gauss-Jacobi(2nu+1, zhat-1) on [0,1]; renormalize weights to the true
-            % Beta moment B(zhat, 2nu+2) (Gauss.jacobi carries a spurious 2^{alpha+beta} factor).
+            % s-grid: Gauss-Jacobi(2nu+1, zhat-1) on [0,1]. The renormalization to the
+            % exact Beta moment B(zhat, 2nu+2) is now a no-op safeguard: Gauss.jacobi's
+            % [0,1] mapping carries the properly rescaled weight function.
             qj = Gauss.jacobi(Ns, 2*nu_val + 1, zhat - 1, 0, 1);
             tk = qj.x; wtk = qj.w;
             Bmom = exp(gammaln(zhat) + gammaln(2*nu_val + 2) - gammaln(zhat + 2*nu_val + 2));
@@ -440,9 +710,30 @@ classdef GeneralCollisionTensor < handle
 
             is_nf = (km == 1);
             if is_nf
-                WR_eta = W_R .* (1 - R_nodes).^zhat;     % (1-R)^zhat  (both channels)
-                Wr_t1  = W_r .* (r_nodes).^zhat;         % r^zhat      (I-channel)
-                Wr_t2  = W_r .* (1 - r_nodes).^zhat;     % (1-r)^zhat  (J-channel)
+                % Bounded partition prefactors, folded into SHIFTED Gauss-Jacobi
+                % rules per active channel (spectral -- in fact exact, since the
+                % remaining r/R integrand is polynomial: post-collision internal
+                % basis at I' = r(1-R)E, J' = (1-r)(1-R)E; the loss integrand is
+                % constant). The former pointwise application of r^zhat,
+                % (1-r)^zhat, (1-R)^zhat on the UNSHIFTED rules was only
+                % algebraically convergent (fractional endpoint powers,
+                % zhat = zeta_hat/2 non-integer). Gauss.jacobi(N, a, b, 0, 1)
+                % integrates f(t) (1-t)^a t^b dt on [0,1], so with the native
+                % weights r^nu(1-r)^nu and R^{(1+zeta)/2}(1-R)^{2nu+1}:
+                %   R axis, both channels : (1-R)^{2nu+1+zhat} R^{(1+zeta)/2}
+                %       -> Gauss.jacobi(N_R, 2*nu+1+zhat, (1+zeta)/2)
+                %   r axis, I-active chan.: (1-r)^{nu} r^{nu+zhat}
+                %       -> Gauss.jacobi(N_r, nu, nu+zhat)
+                %   r axis, J-active chan.: (1-r)^{nu+zhat} r^{nu}
+                %       -> Gauss.jacobi(N_r, nu+zhat, nu)
+                % The MEX computes its loss moments from the passed weights (their
+                % sums are now the exact Beta masses), so gain and loss stay
+                % consistent. The rules are s-independent: build once.
+                N_r = numel(r_nodes);  N_R = numel(R_nodes);
+                R_beta = 0.5 + obj.Kernel.zeta / 2.0;
+                qR  = Gauss.jacobi(N_R, 2*nu_val + 1 + zhat, R_beta, 0, 1);
+                qr1 = Gauss.jacobi(N_r, nu_val, nu_val + zhat, 0, 1);   % I-active
+                qr2 = Gauss.jacobi(N_r, nu_val + zhat, nu_val, 0, 1);   % J-active
             end
 
             Rc = 0;
@@ -450,8 +741,8 @@ classdef GeneralCollisionTensor < handle
                 t = tk(k); s = t / (1 - t); sig = 1 - t;     % sigma = 1/(1+s)
                 In_S = tS * sig;  In_P = tP * sig;           % scale nodes; weights unscaled
                 if is_nf
-                    Rc_I = aux_mex(km, In_S, wS, In_P, wP, r_nodes, Wr_t1, R_nodes, WR_eta, s);
-                    Rc_J = aux_mex(km, In_P, wP, In_S, wS, r_nodes, Wr_t2, R_nodes, WR_eta, s);
+                    Rc_I = aux_mex(km, In_S, wS, In_P, wP, qr1.x, qr1.w, qR.x, qR.w, s);
+                    Rc_J = aux_mex(km, In_P, wP, In_S, wS, qr2.x, qr2.w, qR.x, qR.w, s);
                 else
                     Rc_I = aux_mex(km, In_S, wS, In_P, wP, r_nodes, W_r, R_nodes, W_R, s);
                     Rc_J = aux_mex(km, In_P, wP, In_S, wS, r_nodes, W_r, R_nodes, W_R, s);

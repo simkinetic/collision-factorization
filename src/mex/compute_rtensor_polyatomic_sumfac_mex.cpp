@@ -108,6 +108,11 @@ struct Config {
     // non-frozen channel (kernel_model==1); eta_hat_f/zeta_hat_f on the frozen one (==2).
     // All zero -> base DSMC (eq 54) kernel.
     double eta_hat, zeta_hat, eta_hat_f, zeta_hat_f;
+    // Frozen-channel e_tr^{zeta/2} weight of Djordjic eq. (43).  Default 0 =
+    // PRODUCTION: the factor is applied.  Set to 1 only to reproduce the eq. (53)
+    // DSMC-comparison form, whose frozen term is |u|^zeta * C^f_VHS * delta*delta
+    // with no e_tr weight (diagnostic / paper discussion only).
+    int frozen_no_etr;
     
     const double *x_nodes, *W_x; int N_x;
     const double *u1_nodes, *W_u1; int N_u1;
@@ -471,6 +476,21 @@ inline void compute_frozen_inner(const Config& cfg, ThreadScratch& tb,
                 factor *= hf;
             }
 
+            // Eq. (43) frozen weight e_tr^{zeta/2}.  In a frozen collision the
+            // deltas fix e_tr = R' = R = (1/2)u^2 / E exactly (see the header
+            // note), so eq. (43) carries the SAME R^{zeta/2} weight on both
+            // channels -- on the non-frozen one it is folded into the Jacobi
+            // R-weight (R_beta = 1/2 + zeta/2), here it is the collapsed value.
+            // Per-(I,J,u) scalar like the eta_hat_f weight above: it multiplies
+            // gain and loss alike, so the elastic collision still conserves
+            // mass, momentum and energy.  Identity at zeta = 0.
+            // frozen_no_etr == 1 drops it, recovering the eq. (53) DSMC form.
+            if (!cfg.frozen_no_etr) {
+                double E_tr = 0.5 * u_mag * u_mag;
+                double E    = E_tr + I_val + J_val;
+                factor *= std::pow(E_tr / E, cfg.alpha / 2.0);
+            }
+
             double loss_weight = factor * 4.0 * M_PI;
 
             // --- Loss term (test functions at the pre-collision state (v,I)) ---
@@ -675,8 +695,8 @@ inline void compute_patch2(const Config& cfg, int i, double x_i, ThreadScratch& 
 // MEX MAIN FUNCTION
 // ========================================================================
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
-    if (nrhs != 39 && nrhs != 40 && nrhs != 44) {
-        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires 39 inputs (legacy), 40 (with kernel_model), or 44 (with extended-model eta_hat/zeta_hat/eta_hat_f/zeta_hat_f).");
+    if (nrhs != 39 && nrhs != 40 && nrhs != 44 && nrhs != 45) {
+        mexErrMsgIdAndTxt("R_tensor_polyatomic:InvalidInput", "Requires 39 inputs (legacy), 40 (with kernel_model), 44 (with extended-model eta_hat/zeta_hat/eta_hat_f/zeta_hat_f), or 45 (adding the frozen_no_etr opt-out flag).");
     }
     
     Config cfg;
@@ -720,10 +740,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     cfg.kernel_model = (nrhs >= 40) ? (int)mxGetScalar(prhs[39]) : 0;
 
     // Extended-model (eq 43) modulation params (default 0 = base DSMC kernel).
-    cfg.eta_hat    = (nrhs == 44) ? mxGetScalar(prhs[40]) : 0.0;
-    cfg.zeta_hat   = (nrhs == 44) ? mxGetScalar(prhs[41]) : 0.0;
-    cfg.eta_hat_f  = (nrhs == 44) ? mxGetScalar(prhs[42]) : 0.0;
-    cfg.zeta_hat_f = (nrhs == 44) ? mxGetScalar(prhs[43]) : 0.0;
+    cfg.eta_hat    = (nrhs >= 44) ? mxGetScalar(prhs[40]) : 0.0;
+    cfg.zeta_hat   = (nrhs >= 44) ? mxGetScalar(prhs[41]) : 0.0;
+    cfg.eta_hat_f  = (nrhs >= 44) ? mxGetScalar(prhs[42]) : 0.0;
+    cfg.zeta_hat_f = (nrhs >= 44) ? mxGetScalar(prhs[43]) : 0.0;
+    // Opt-out flag; absent => 0 => production eq. (43) kernel (e_tr weight ON).
+    cfg.frozen_no_etr = (nrhs == 45) ? (int)mxGetScalar(prhs[44]) : 0;
 
     cfg.sum_WR = 0.0; for(int q=0; q<cfg.N_R_nodes; ++q) cfg.sum_WR += cfg.W_R[q];
     cfg.sum_Wr = 0.0; for(int q=0; q<cfg.N_r_nodes; ++q) cfg.sum_Wr += cfg.W_r[q];

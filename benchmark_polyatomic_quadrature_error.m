@@ -1,4 +1,4 @@
-%% Polyatomic Quadrature Convergence Study (Paper Section 5.2)
+%% Polyatomic Quadrature Convergence Study (Paper Section 5.1)
 % Spectral convergence of the 9D polyatomic singular quadrature, isolating the
 % NEW internal-energy quadrature rules introduced in Table 1: the Generalized
 % Gauss-Laguerre rules for the target/incident internal energies (I, J) and the

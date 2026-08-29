@@ -1,3 +1,57 @@
+% benchmark_memory_compression.m
+% =========================================================================
+% DEPRECATED -- MONATOMIC LEGACY BENCHMARK. NOT A POLYATOMIC PAPER ARTIFACT.
+%
+% WHAT THIS SCRIPT IS
+%   The storage-footprint benchmark of the MONATOMIC predecessor study,
+%   Hiemstra, Kessler & Abdelmalik, "Wigner-Eckart factorization of the
+%   spectral Boltzmann collision operator" (arXiv:2605.28475). It is kept
+%   here, unchanged, as the artifact of that paper -- the polyatomic paper
+%   cites its 37.2x contraction speedup -- and not because it plays any part
+%   in the polyatomic results.
+%
+% IT CANNOT REPRODUCE SECTION 5.6 OF THE POLYATOMIC PAPER
+%   This script is monatomic. It runs at K_max = 4, there is no internal
+%   truncation I_max anywhere in it, and it reads the gamma-named monatomic
+%   caches collisiontensor_k%d_l%d_gamma%.2f.mat. The polyatomic Section 5.6
+%   is at K_max = 2 and sweeps I_max = 0..4. No number printed or plotted
+%   below therefore appears in Section 5.6, in Table 5, or in Figures 9
+%   and 10.
+%
+%   >>> Section 5.6 of the polyatomic paper -- the storage counts, the
+%   >>> geometry and slice counts, and the contraction timings, i.e.
+%   >>> Table 5 and Figures 9 and 10 -- is produced SOLELY by
+%   >>> benchmark_polyatomic_performance.m, which builds everything in
+%   >>> memory and reads no cache at all.
+%
+% THE CACHES IT NEEDS ARE NOT SHIPPED
+%   src/precalc/ contains no collisiontensor_k4_l*_gamma1.00.mat files:
+%   these are large monatomic hard-sphere tensors and are deliberately not
+%   distributed. On a clean checkout every L_max therefore prints
+%   "[SKIP] File missing", all curves stay NaN, and the first figure then
+%   fails in its ylim() call with MATLAB:rulerFunctions:InvalidNumericLimits
+%   because max(naive_GB) is NaN. That is the expected behaviour of an
+%   un-regenerated legacy benchmark, not a bug in the library.
+%
+%   To run it, regenerate the caches first with
+%   precompute_collision_operator.m, edited to the monatomic settings this
+%   script asks for:
+%
+%       K_max      = 4;                        % already its default
+%       L_max_list = [2, 4, 6, 8, 10, 12];     % it ships as [2, 4, 6]
+%       gamma      = 1.0;                      % it ships as 0.0 (Maxwell)
+%
+%   gamma = 1.0 is hard spheres, which is what the filename assembled below
+%   asks for. Budget hours of quadrature and tens of GB on disk: the upper
+%   L_max entries at the script's pad = 20 dominate both.
+%
+% STORAGE MODEL -- DIFFERS FROM THE POLYATOMIC PAPER
+%   The Gaunt term below is charged at 20 bytes per nonzero. The polyatomic
+%   paper's eq. (30) charges 40 bytes (5 doubles) per Gaunt transition, and
+%   eq. (30) is the authoritative model for the polyatomic paper. See the
+%   STORAGE MODEL note at the Gaunt_GB assignment further down.
+% =========================================================================
+
 %% BENCHMARK: Extreme Memory Compression & Efficiency (JCP Figures)
 % Measures memory footprint using precomputed Wigner-Eckart factorized tensors.
 clear; clc; close all;
@@ -67,9 +121,26 @@ for i = 1:length(L_vec)
     naive_GB(i) = (8 * (DOF_vec(i)^3)) / (1024^3);
     R_GB(i)     = (8 * (N_K^3) * N_L) / (1024^3);
     
-    % Sparse Gaunt tensor stored in COO format 
+    % Sparse Gaunt tensor stored in COO format
     % Assuming 3x uint32 (12 bytes) + 1x double (8 bytes) = 20 bytes per nonzero
-    Gaunt_GB(i) = (20 * NG_vec(i)) / (1024^3); 
+    %
+    % STORAGE MODEL NOTE (monatomic legacy model -- NOT the polyatomic paper's)
+    %   This 20-bytes-per-nonzero figure is a packed-COO estimate: three
+    %   uint32 index labels plus one double Gaunt weight, and no channel tag.
+    %   The POLYATOMIC paper's eq. (30) instead charges FIVE DOUBLES =
+    %   40 BYTES per Gaunt transition (three index labels, the Gaunt weight,
+    %   the channel tag), i.e.
+    %       M_fact = 8 * ( N_T * N_KI^3 + 5 * N_G ).
+    %   Equation (30) is the AUTHORITATIVE model for the polyatomic paper;
+    %   Table 5 and Figure 9 are computed from it by
+    %   benchmark_polyatomic_performance.m. The two models differ by exactly
+    %   a factor 2 on the routing term, which is not cosmetic: at low
+    %   internal truncation the routing list is ~98% of the factorized
+    %   total, so the factorized footprints and compression ratios printed
+    %   below are nearly a factor 2 apart from the paper's.
+    %   Left as-is on purpose -- it is the model of the monatomic study this
+    %   script belongs to.
+    Gaunt_GB(i) = (20 * NG_vec(i)) / (1024^3);
     
     total_fact_GB(i) = R_GB(i) + Gaunt_GB(i);
 end

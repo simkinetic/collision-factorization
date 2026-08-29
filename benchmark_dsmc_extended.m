@@ -51,7 +51,9 @@ end
 function process_gas(gs, K_max, L_max, I_max, pad)
     nm=gs{1}; delta=gs{2}; zeta=gs{3}; Pr_m=gs{4}; numu_m=gs{5};
     om4=gs{6}; eh=gs{7}; zh=gs{8}; ehf4=gs{9}; zhf=gs{10};
-    nu = delta/2-1; rho = sqrt(5/(4*delta));
+    % rho = d_q/d_s = sqrt(5/delta): l=1 heat-flux moment ratio, counterpart of
+    % the sqrt(3/delta) that fixes the l=0 energy invariant.
+    nu = delta/2-1; rho = sqrt(5/delta);
     Basis = SpectralBasis(K_max,L_max,I_max,nu);
     N_I=I_max+1; N_Q=(L_max+1)^2;
 
