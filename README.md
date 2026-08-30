@@ -280,6 +280,24 @@ Every numbered artifact of the polyatomic paper and the script that produces it.
 | Sec. 5.5.5 — spectral-vs-algebraic quadrature-path difference (stdout only) | `benchmark_polyatomic_quadrature_path_difference.m` | **needs prebuilt caches** |
 | Table 5 + Figs. 9–10, Sec. 5.6 — storage, geometry, contraction timings | `benchmark_polyatomic_performance.m` | none, ~10 min |
 
+### Where artifacts are written
+
+The benchmark and plotting scripts resolve their output directory through
+`paper_output_dir.m`, which checks, in order:
+
+1. `local_paths.m` — untracked. Create it returning an absolute path to point the
+   scripts at a manuscript tree. This is the reliable option under MATLAB started
+   from the macOS Dock, which does not inherit a shell profile.
+2. `COLLISION_PAPER_DIR` — environment variable, same purpose.
+3. `<repo>/results/figures` — the default on a fresh clone. `results/` is untracked,
+   so nothing lands in the git tree.
+
+Two scripts also *read* `fig_transport_fits_data.mat` back from this directory
+(`plot_transport_fits_paper.m` and `benchmark_polyatomic_transport_fits.m`). That
+file is 7.4 MB and ships with the manuscript rather than this repository, so on a
+fresh clone Figure 8 cannot be re-rendered until it is placed in the resolved
+directory. Regenerating it from scratch requires the cached operators.
+
 **Known gaps.** Two statements in Section 5.5 have no script in this repository that reproduces them directly, and are reported here rather than left for the reader to discover:
 
 * **Sec. 5.5.4, resolved re-fits.** `benchmark_polyatomic_internal_truncation.m` supplies the resolved and first-order $\mu_b/\mu$ for all three gases, but the resolved re-fits $(\omega, \hat\eta_f)$ quoted alongside them are not produced by any shipped script.

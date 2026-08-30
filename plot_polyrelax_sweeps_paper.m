@@ -13,7 +13,7 @@ T_v0 = P.T_v0; T_I0 = P.T_I0; delta_B = P.delta_B;
 Teq_of = @(di) (3*T_v0 + di*T_I0) / (3 + di);
 Teq_str  = {'6/5', '7/6', '8/7'};
 lamLT_str = {'5/7', '2/3', '7/11'};
-paperdir = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+paperdir = paper_output_dir();
 
 set(groot, 'defaultTextInterpreter', 'latex');
 set(groot, 'defaultLegendInterpreter', 'latex');

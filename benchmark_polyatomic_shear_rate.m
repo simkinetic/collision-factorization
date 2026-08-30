@@ -92,7 +92,7 @@ addpath(genpath(fullfile(proj,'src','SHL')));
 addpath(fullfile(proj,'src','mex'));
 
 write_csv  = true;
-paper_figs = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+paper_figs = paper_output_dir();
 csv_name   = 'fig_wcu_limit_shear_rate_data.csv';
 
 % ---- build configuration (Section 5.2) ----------------------------------

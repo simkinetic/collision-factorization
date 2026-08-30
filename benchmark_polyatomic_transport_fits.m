@@ -37,7 +37,7 @@
 % (w, ehf) grids of the shipped artifact. Prints old-vs-new deltas.
 repo = fileparts(mfilename('fullpath'));
 addpath(repo, fullfile(repo,'src'), fullfile(repo,'src','mex')); addpath(genpath(fullfile(repo,'src','SHL')));
-pf = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+pf = paper_output_dir();
 
 OLD = load(fullfile(pf,'fig_transport_fits_data.mat'));
 ehf_grid = OLD.ehf_grid; w_grid = OLD.w_grid;

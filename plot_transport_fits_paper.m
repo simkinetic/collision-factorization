@@ -50,7 +50,7 @@ LW_SQ  = 1.6;  LW_CI = 1.3;
 % legend proxies are drawn at a fixed fraction of the above so the legend rows
 % stay compact; the nesting order they show is the same.
 LEG_F  = 0.30;
-pf = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+pf = paper_output_dir();
 S = load(fullfile(pf,'fig_transport_fits_data.mat'));
 D = S.D;
 

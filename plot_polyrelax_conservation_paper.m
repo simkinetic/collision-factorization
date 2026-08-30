@@ -8,7 +8,7 @@ root = fileparts(mfilename('fullpath'));
 D = load(fullfile(root,'results','polyrelax_results.mat'));
 Rcons = D.Rcons; Rcons_mx = D.Rcons_mx;
 zeta = D.params.zeta; delta_B = D.params.delta_B;
-paperdir = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+paperdir = paper_output_dir();
 
 set(groot, 'defaultTextInterpreter', 'latex');
 set(groot, 'defaultLegendInterpreter', 'latex');

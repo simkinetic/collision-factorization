@@ -16,7 +16,7 @@ clear; clc; close all;
 
 root = fileparts(mfilename('fullpath'));
 D = load(fullfile(root, 'spatial_quadrature_convergence_data.mat'));
-paperdir = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+paperdir = paper_output_dir();
 
 FS_labels = 28; FS_ticks = 18; FS_legend = 18;
 c_maxwell = [0.8500, 0.3250, 0.0980];   % orange-red (matches monatomic Maxwell)
