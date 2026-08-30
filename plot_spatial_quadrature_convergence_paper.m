@@ -15,7 +15,7 @@
 clear; clc; close all;
 
 root = fileparts(mfilename('fullpath'));
-D = load(fullfile(root, 'spatial_quadrature_convergence_data.mat'));
+D = load(fullfile(paper_output_dir(), 'spatial_quadrature_convergence_data.mat'));
 paperdir = paper_output_dir();
 
 FS_labels = 28; FS_ticks = 18; FS_legend = 18;

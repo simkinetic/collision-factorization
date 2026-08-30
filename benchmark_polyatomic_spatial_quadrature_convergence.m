@@ -52,5 +52,5 @@ for z = 1:numel(zetas)
     out.(labels{z}) = errs;
 end
 
-save(fullfile(root, 'spatial_quadrature_convergence_data.mat'), '-struct', 'out');
-fprintf('Saved %s\n', fullfile(root, 'spatial_quadrature_convergence_data.mat'));
+save(fullfile(paper_output_dir(), 'spatial_quadrature_convergence_data.mat'), '-struct', 'out');
+fprintf('Saved %s\n', fullfile(paper_output_dir(), 'spatial_quadrature_convergence_data.mat'));

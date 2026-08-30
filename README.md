@@ -18,7 +18,7 @@ Scripts belonging to the two studies are kept side by side. Anything named `*_po
 * **`src/mex/`**: C++ source files for the heavily optimized, parallelized tensor contraction algorithms and quadrature evaluations.
 * **`src/precalc/`**: Working directory for the serialized collision tensors (`.mat`). **It ships empty.** Every cache in it is a build product, regenerated on demand — see [Regenerating the precomputed tensors](#regenerating-the-precomputed-tensors).
 * **`tests/`**: Automated unit tests validating the spectral basis properties, spherical harmonics, quadrature reproduction, the analytical Wang Chang-Uhlenbeck (WCU) eigenvalues, the polyatomic conservation embedding, and the $I_{\max} = 0$ monatomic collapse.
-* **`results/`**: Every script writes here (`*.mat`, `*.csv`, generated `*.tex` tables and figures), and the figure renderers read back out. Its contents are untracked, with one exception: `fig_transport_fits_data.mat` ships, because `plot_transport_fits_paper.m` reads it as input and regenerating it needs the cached operators.
+* **`results/`**: Every script writes here (`*.mat`, `*.csv`, generated `*.tex` tables and figures), and the figure renderers read back out. Its contents are untracked, except for two shipped data files that the figure renderers read as input and that are expensive to regenerate: `fig_transport_fits_data.mat` (Figure 8) and `spatial_quadrature_convergence_data.mat` (Figure 3).
 * **Root Directory**: High-level tutorials and benchmark scripts designed to directly reproduce the figures and tables presented in the two manuscripts.
 
 ## Requirements

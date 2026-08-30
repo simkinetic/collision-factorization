@@ -401,7 +401,7 @@ fprintf('  L_max = 12: routing list as a fraction of the factorized total, I_max
 % measured on the reference machine; shipping a re-run's timings alongside
 % them would put two slightly different sets of numbers in circulation for
 % the same quantity. Only the exact counts go to the paper.
-p0 = fullfile(proj, 'perf_contraction_timings.csv');
+p0 = fullfile(paper_output_dir(), 'perf_contraction_timings.csv');
 writetable(Ttime, p0);
 fprintf('\nWrote %s   (local measurement log -- NOT a paper artifact)\n', p0);
 

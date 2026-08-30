@@ -18,14 +18,14 @@
 %
 % Writes:
 %   <paper repo>/figures/fig_transport_fits.pdf
-%   <repo root>/fig_transport_fits_marker_check.png   (200 dpi PRINT-SIZE check,
+%   results/fig_transport_fits_marker_check.png   (200 dpi PRINT-SIZE check,
 %       i.e. downscaled to \textwidth = 468.33 pt = 6.505 in -> 1301 px wide,
 %       which is how the PDF actually appears via \includegraphics[width=\textwidth])
 %
 % Recovered from session transcript; modified only for repo paths:
 %   - the 200-dpi verification raster was written to the session scratchpad
 %     ('.../scratchpad/results/fits_marker_check.png'), which no longer exists;
-%     it now goes to fig_transport_fits_marker_check.png at the repo root,
+%     it now goes to fig_transport_fits_marker_check.png in results/,
 %     beside the other loose fig_*.pdf checks.
 %   - `root = fileparts(mfilename('fullpath'));` added to support that path.
 % No other line was changed.
@@ -108,7 +108,7 @@ tmpng = [tempname '.png'];
 exportgraphics(fig, tmpng, 'Resolution', 600);
 Ichk = imread(tmpng); delete(tmpng);
 Ichk = imresize(Ichk, [NaN round(6.505*200)]);
-imwrite(Ichk, fullfile(root,'fig_transport_fits_marker_check.png'));
+imwrite(Ichk, fullfile(paper_output_dir(),'fig_transport_fits_marker_check.png'));
 fprintf('RND| wrote %s\n', fullfile(pf,'fig_transport_fits.pdf'));
 fprintf('RND| print-size check raster %dx%d px -> %s\n', size(Ichk,2), size(Ichk,1), ...
-    fullfile(root,'fig_transport_fits_marker_check.png'));
+    fullfile(paper_output_dir(),'fig_transport_fits_marker_check.png'));
