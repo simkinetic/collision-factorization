@@ -278,13 +278,14 @@ Every numbered artifact of the polyatomic paper and the script that produces it.
 | Sec. 5.5.2 — transport coefficients at the published parameters | `benchmark_polyatomic_transport_fits.m` (the `table4` operating point) | **needs prebuilt caches** |
 | Table 4 + Fig. 8, Sec. 5.5.3 — polyatomic transport coefficients and fits | `benchmark_polyatomic_transport_fits.m` (data) → `plot_transport_fits_paper.m` (figure) | **needs prebuilt caches**; overwrites its own input, see the warning above |
 | Sec. 5.5.4 — Chapman-Enskog order sensitivity, N₂ | `benchmark_polyatomic_chapman_enskog.m` (Phase 2) | self-caching |
+| Sec. 5.5.4 — resolved vs first-order $\mu_b/\mu$ and its $I_{\max}$ convergence, all three gases (stdout + CSV) | `benchmark_polyatomic_internal_truncation.m` | self-caching, hours — the $I_{\max} = 3, 4$ rungs are the expensive ones |
 | Sec. 5.5 — closure-attribution cross-check behind Table 4 (stdout only) | `benchmark_polyatomic_closure_attribution.m` | **needs prebuilt caches** |
 | Sec. 5.5.5 — spectral-vs-algebraic quadrature-path difference (stdout only) | `benchmark_polyatomic_quadrature_path_difference.m` | **needs prebuilt caches** |
 | Table 5 + Figs. 9–10, Sec. 5.6 — storage, geometry, contraction timings | `benchmark_polyatomic_performance.m` | none, ~10 min |
 
 **Known gaps.** Two statements in Section 5.5 have no script in this repository that reproduces them directly, and are reported here rather than left for the reader to discover:
 
-* **Sec. 5.5.4, CO and H₂.** `benchmark_polyatomic_chapman_enskog.m` runs the resolved (Schur-reduced) extraction for N₂ only. The quoted resolved shifts for CO ($13.3\%$) and H₂ ($4.5\%$), and the resolved re-fits $(\omega, \hat\eta_f)$ for all three gases, are not produced by any shipped script.
+* **Sec. 5.5.4, resolved re-fits.** `benchmark_polyatomic_internal_truncation.m` supplies the resolved and first-order $\mu_b/\mu$ for all three gases, but the resolved re-fits $(\omega, \hat\eta_f)$ quoted alongside them are not produced by any shipped script.
 * **Sec. 5.5.5, truncation robustness.** The sweep over $(K_{\max}, I_{\max}) \in \{(1,2), (2,2), (3,2), (2,1), (2,3)\}$ is not scripted, though the caches it used are reproducible with `build_or_load_dsmc_tensor.m` at those truncations.
 
 Supporting drivers (they feed the Section 5.5 discussion but are not themselves artifact generators): `benchmark_dsmc_transport.m` and `benchmark_dsmc_extended.m`, the transport benchmarks described below; `plot_polyce_convergence.m`, which re-renders the Chapman-Enskog convergence figure from `results/polyce_results.mat`; `build_or_load_dsmc_tensor.m`, the tensor cache layer they share.
