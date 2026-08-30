@@ -244,7 +244,7 @@ end
 >
 > `build_or_load_dsmc_tensor` itself handles both names (it has a legacy read fallback); only the three scripts that bypass it need this.
 
-> **`benchmark_polyatomic_transport_fits.m` overwrites its own input.** It reads `fig_transport_fits_data.mat` from the paper repository's `figures/` directory to reuse the shipped $(\omega, \hat\eta_f)$ sampling grids and to print old-vs-new deltas, and then writes the same file back. **Back that file up before rerunning it.** `plot_transport_fits_paper.m` is the render-only pass: it reads that `.mat` and writes no data, so use it whenever only the figure needs redrawing.
+> **`benchmark_polyatomic_transport_fits.m` overwrites its own input.** It reads `results/fig_transport_fits_data.mat` to reuse the shipped $(\omega, \hat\eta_f)$ sampling grids and to print old-vs-new deltas, and then writes the same file back. That file is tracked, so `git checkout results/fig_transport_fits_data.mat` restores the shipped copy. `plot_transport_fits_paper.m` is the render-only pass: it reads that `.mat` and writes no data, so use it whenever only the figure needs redrawing.
 
 ### Monatomic tensors
 
@@ -282,21 +282,16 @@ Every numbered artifact of the polyatomic paper and the script that produces it.
 
 ### Where artifacts are written
 
-The benchmark and plotting scripts resolve their output directory through
-`paper_output_dir.m`, which checks, in order:
+Every benchmark and plotting script writes to `<repo>/results`, resolved through
+`paper_output_dir.m` and created on first use. Nothing is written outside the
+repository, and nothing needs configuring on a fresh clone.
 
-1. `local_paths.m` — untracked. Create it returning an absolute path to point the
-   scripts at a manuscript tree. This is the reliable option under MATLAB started
-   from the macOS Dock, which does not inherit a shell profile.
-2. `COLLISION_PAPER_DIR` — environment variable, same purpose.
-3. `<repo>/results/figures` — the default on a fresh clone. `results/` is untracked,
-   so nothing lands in the git tree.
-
-Two scripts also *read* `fig_transport_fits_data.mat` back from this directory
-(`plot_transport_fits_paper.m` and `benchmark_polyatomic_transport_fits.m`). That
-file is 7.4 MB and ships with the manuscript rather than this repository, so on a
-fresh clone Figure 8 cannot be re-rendered until it is placed in the resolved
-directory. Regenerating it from scratch requires the cached operators.
+`results/` is untracked with one exception: `results/fig_transport_fits_data.mat`
+(7.4 MB) ships with the repository. It is the *input* of
+`plot_transport_fits_paper.m`, not only its output, and regenerating it from
+scratch requires the cached operators — so Figure 8 renders immediately on a
+clean checkout. `benchmark_polyatomic_transport_fits.m` overwrites it in place;
+`git checkout results/fig_transport_fits_data.mat` restores the shipped copy.
 
 **Known gaps.** Two statements in Section 5.5 have no script in this repository that reproduces them directly, and are reported here rather than left for the reader to discover:
 
