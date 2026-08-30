@@ -50,10 +50,19 @@ addpath(repo, fullfile(repo,'src'), fullfile(repo,'src','mex')); addpath(genpath
 % `refitted` rows of figures/fig_transport_fits_points.csv. (The pairs carried
 % here before 2026-08-29 were fitted under the superseded rho = sqrt(5/(4 delta))
 % and reproduced only mu_b/mu, missing Pr by ~2.6-3.0% for N2 and CO.)
+% zeta (third field) is taken DIRECTLY from Djordjic et al. (2023), Table 1,
+% which tabulates it per gas: 0.533 (N2), 0.53 (CO), 0.607 (H2). It is NOT
+% recomputed here as 2*(1 - s_visc) from the tabulated viscosity exponent,
+% which would give 0.534 / 0.530 / 0.608. The difference is in the third decimal
+% only, but the calibration these runs are compared against (their Table 4) was
+% produced at their tabulated zeta, so using it keeps the inputs like-for-like.
+% CO is unchanged (0.53).
+% The last field of each row is our refitted (omega, zeta_hat_f) pair; it is the
+% "refitted" row of figures/fig_transport_fits_points.csv, regenerate that first.
 G = { ...
- {'N2','0.534','2.01','0.3',  0.717,0.73, [0.312052,-0.3,-0.207793],  [0.31276402,-0.20588939]}, ...
+ {'N2','0.533','2.01','0.3',  0.717,0.73, [0.312052,-0.3,-0.207793],  [0.31205166,-0.20779265]}, ...
  {'CO','0.53', '2.01','0.965',0.743,0.55, [0.540506,-0.453,0.570111], [0.54050581, 0.57011043]}, ...
- {'H2','0.608','1.94','0.965',0.686,30.0, [0.0101187,-0.453,-0.133879],[0.01012942,-0.13240930]} };
+ {'H2','0.607','1.94','0.965',0.686,30.0, [0.0101187,-0.453,-0.133879],[0.010118716,-0.13387950]} };
 
 for gi = 1:numel(G)
     % rho = d_q/d_s = sqrt(5/delta): l=1 heat-flux moment ratio, counterpart of

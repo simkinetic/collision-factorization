@@ -36,10 +36,17 @@
 repo = fileparts(mfilename('fullpath'));
 addpath(repo, fullfile(repo,'src'), fullfile(repo,'src','mex')); addpath(genpath(fullfile(repo,'src','SHL')));
 
+% zeta (third field) is taken DIRECTLY from Djordjic et al. (2023), Table 1,
+% which tabulates it per gas: 0.533 (N2), 0.53 (CO), 0.607 (H2). It is NOT
+% recomputed here as 2*(1 - s_visc) from the tabulated viscosity exponent,
+% which would give 0.534 / 0.530 / 0.608. The difference is in the third decimal
+% only, but the calibration these runs are compared against (their Table 4) was
+% produced at their tabulated zeta, so using it keeps the inputs like-for-like.
+% CO is unchanged (0.53).
 G = { ...
- {'N2','0.534','2.01','0.3',  0.717,0.73, [0.312052,-0.3,-0.207793]}, ...
+ {'N2','0.533','2.01','0.3',  0.717,0.73, [0.312052,-0.3,-0.207793]}, ...
  {'CO','0.53', '2.01','0.965',0.743,0.55, [0.540506,-0.453,0.570111]}, ...
- {'H2','0.608','1.94','0.965',0.686,30.0, [0.0101187,-0.453,-0.133879]} };
+ {'H2','0.607','1.94','0.965',0.686,30.0, [0.0101187,-0.453,-0.133879]} };
 
 mxPr = 0; mxNM = 0;
 for gi = 1:numel(G)

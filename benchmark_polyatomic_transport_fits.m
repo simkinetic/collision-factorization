@@ -42,10 +42,18 @@ pf = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figur
 OLD = load(fullfile(pf,'fig_transport_fits_data.mat'));
 ehf_grid = OLD.ehf_grid; w_grid = OLD.w_grid;
 
+% zeta ('zt') is taken DIRECTLY from Djordjic et al. (2023), Table 1, which
+% tabulates it per gas: 0.533 (N2), 0.53 (CO), 0.607 (H2). It is NOT recomputed
+% here as 2*(1 - s_visc) from the tabulated viscosity exponent, which would give
+% 0.534 / 0.530 / 0.608. The difference is in the third decimal only, but the
+% calibration this driver is compared against (their Table 4) was produced at
+% their tabulated zeta, so using it keeps the comparison like-for-like: at the
+% derived zeta our re-fitted (omega, eta_hat_f) miss their published pair by
+% ~1%, at their tabulated zeta they agree to ~1e-6. CO is unchanged (0.53).
 gases = { ...
-  struct('gas','N2','label','N$_2$','zt','0.534','dt','2.01','zhf','0.3',  'Pr',0.717,'nm',0.73, 'p4',[0.312052 -0.3 -0.207793 0.3]), ...
+  struct('gas','N2','label','N$_2$','zt','0.533','dt','2.01','zhf','0.3',  'Pr',0.717,'nm',0.73, 'p4',[0.312052 -0.3 -0.207793 0.3]), ...
   struct('gas','CO','label','CO',   'zt','0.53', 'dt','2.01','zhf','0.965','Pr',0.743,'nm',0.55, 'p4',[0.540506 -0.453 0.570111 0.965]), ...
-  struct('gas','H2','label','H$_2$','zt','0.608','dt','1.94','zhf','0.965','Pr',0.686,'nm',30.0, 'p4',[0.0101187 -0.453 -0.133879 0.965]) };
+  struct('gas','H2','label','H$_2$','zt','0.607','dt','1.94','zhf','0.965','Pr',0.686,'nm',30.0, 'p4',[0.0101187 -0.453 -0.133879 0.965]) };
 
 D = struct([]);
 for gi = 1:numel(gases)
@@ -160,38 +168,13 @@ end
 % ---- render -------------------------------------------------------------
 set(groot,'defaultTextInterpreter','latex','defaultLegendInterpreter','latex', ...
     'defaultAxesTickLabelInterpreter','latex');
-fig = figure('Position',[50 50 1560 500],'Color','w');
-tl = tiledlayout(1,3,'Padding','compact','TileSpacing','compact');
-pan = {'(a)','(b)','(c)'};
-for gi = 1:numel(D)
-    g = D(gi); ax = nexttile; hold(ax,'on');
-    hr = fill(g.bx, g.by, [0.80 0.88 0.97], 'EdgeColor', [0.55 0.7 0.9], 'FaceAlpha', 0.85);
-    hp = plot(g.pbx, g.pby, 'r-', 'LineWidth', 2.2);
-    hc = plot(g.Pc, g.Mc, 'b-', 'LineWidth', 1.8);
-    he = plot(g.Pr_meas, g.numu_meas, 'p', 'MarkerSize', 13, 'MarkerFaceColor',[0.1 0.55 0.2], 'MarkerEdgeColor','k');
-    ht = plot(g.table4(1), g.table4(2), 'o', 'MarkerSize', 8.5, 'MarkerFaceColor','w', 'MarkerEdgeColor',[0 0.3 0.8], 'LineWidth', 1.6);
-    hf = plot(g.refit(1), g.refit(2), 's', 'MarkerSize', 8, 'MarkerFaceColor',[0.95 0.8 0.1], 'MarkerEdgeColor','k');
-    set(ax,'YScale','log','FontSize',12,'LineWidth',1.05); grid(ax,'on');
-    xlabel(ax,'Prandtl number $\mathrm{Pr}$','FontSize',14);
-    if gi == 1, ylabel(ax,'bulk/shear ratio $\mu_b/\mu$','FontSize',14); end
-    title(ax, sprintf('\\textbf{%s %s}\\quad $\\delta=%.2f$, $\\gamma=%.3f$', ...
-        pan{gi}, g.label, g.delta, g.zeta), 'FontSize', 14);
-    if gi == 1
-        legend([hr hp hc he ht hf], {'reachable $(\omega,\hat\eta_f)$', ...
-            'positivity bound $\hat\eta_f=-1/2$', '$\omega$-sweep at Table-4', ...
-            'experiment', 'Table-4 parameters', 're-fitted'}, ...
-            'Location','southwest', 'FontSize', 10);
-    end
-    xlim(ax, [floor(100*(min(g.bx)-0.001))/100, ceil(100*(max(g.bx)+0.001))/100]);
-    % Match the shipped figure's framing: N2/CO panels clip to ~one decade
-    % (single 10^0 tick); the H2 panel shows the full region from 10^0 up.
-    if gi == 3
-        ylim(ax, [1, max(g.by)*1.15]);
-    else
-        ylim(ax, [min(g.by)*0.95, 8]);
-    end
-end
-exportgraphics(fig, fullfile(pf,'fig_transport_fits.pdf'), 'ContentType','vector');
+% NOTE: this script writes DATA ONLY. The paper's Figure 8 is rendered by
+% plot_transport_fits_paper.m, which owns the marker scheme described in the
+% figure caption (large open square = experiment, open circle = Djordjic
+% Table-4 parameters, filled dot = this work). This script previously drew
+% its own figure to the same path with a different marker scheme and silently
+% overwrote the rendered one; that block has been removed. Run the renderer
+% after this script to refresh the figure.
 fprintf('FIT| artifacts written to %s\n', pf);
 fprintf('FIT| done\n');
 
