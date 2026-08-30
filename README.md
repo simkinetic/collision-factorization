@@ -141,7 +141,6 @@ These scripts validate the operator against analytical kinetic theory limits:
 * `tutorial_collisions_spectral_properties.m`: Computes the Jacobian of the collision operator to extract the Wang Chang-Uhlenbeck eigenvalue spectrum. Builds its tensor in memory; runs on a clean checkout.
 * `tutorial_chapman_enscog_decay_rates.m`: Extracts the infinite-order Chapman-Enskog viscosity limits for Hard Sphere gases by block-diagonalizing the linearized operator. **Requires a monatomic cache that is not shipped** (`collisiontensor_k4_l2_gamma1.00.mat`); regenerate it first — see [Monatomic tensors](#monatomic-tensors).
 * `tutorial_stress_relaxation.m`: Simulates the nonlinear anisotropic stress relaxation of a Hard Sphere gas. **Requires a monatomic cache that is not shipped** (`collisiontensor_k4_l4_gamma1.00.mat`); regenerate it first — see [Monatomic tensors](#monatomic-tensors).
-* `tutorial_discontinuous_maxwellian.m`: Bimodal (shock-interior analog) Maxwellian, Galerkin versus VMS. **Cannot be run from a clean checkout**: it requires `collisiontensor_vms_k4_test6_l4_gamma1.00.mat`, an extended VMS-closure tensor that no shipped generator produces.
 
 ### 2. Computational Benchmarks
 
@@ -250,8 +249,6 @@ end
 ### Monatomic tensors
 
 `precompute_collision_operator.m` generates `collisiontensor_k{K}_l{L}_gamma{γ}.mat`. Its shipped defaults are `K_max = 4`, `L_max_list = [2, 4, 6]`, `gamma = 0.0` (Maxwell molecules). Edit those three lines to whatever the consuming script wants — see the [monatomic legacy benchmarks](#3-monatomic-legacy-benchmarks-caches-not-shipped) below for the settings those two need, and the tutorial list for the single-`L_max` cases. A single `(K_max, L_max) = (4, 2)` hard-sphere tensor at the script's `pad = 20` is minutes; the full `L_max` list to 12 is **hours of quadrature and tens of GB on disk**.
-
-`tutorial_discontinuous_maxwellian.m` needs `collisiontensor_vms_k4_test6_l4_gamma1.00.mat`, an extended VMS-closure tensor that `precompute_collision_operator.m` does **not** generate. There is currently no shipped script that produces it, so that tutorial cannot be run from a clean checkout.
 
 ---
 
