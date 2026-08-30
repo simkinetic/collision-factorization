@@ -9,7 +9,7 @@ D = load(fullfile(root,'results','wcu_limit_results.mat'));
 di_list = D.di_list; lam_mode = D.lam_mode; err_mode = D.err_mode;
 modes_kl = D.modes_kl; conserved = D.conserved; tgt = D.tgt;
 n_modes = size(modes_kl,1);
-paperdir = '/Users/ekke/dev/simkinetic/papers/polyatomic-collision-factorization/figures';
+paperdir = paper_output_dir();
 
 set(groot, 'defaultTextInterpreter', 'latex');
 set(groot, 'defaultLegendInterpreter', 'latex');
