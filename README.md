@@ -293,11 +293,6 @@ scratch requires the cached operators — so Figure 8 renders immediately on a
 clean checkout. `benchmark_polyatomic_transport_fits.m` overwrites it in place;
 `git checkout results/fig_transport_fits_data.mat` restores the shipped copy.
 
-**Known gaps.** Two statements in Section 5.5 have no script in this repository that reproduces them directly, and are reported here rather than left for the reader to discover:
-
-* **Sec. 5.5.4, resolved re-fits.** `benchmark_polyatomic_internal_truncation.m` supplies the resolved and first-order $\mu_b/\mu$ for all three gases, but the resolved re-fits $(\omega, \hat\eta_f)$ quoted alongside them are not produced by any shipped script.
-* **Sec. 5.5.5, truncation robustness.** The sweep over $(K_{\max}, I_{\max}) \in \{(1,2), (2,2), (3,2), (2,1), (2,3)\}$ is not scripted, though the caches it used are reproducible with `build_or_load_dsmc_tensor.m` at those truncations.
-
 Supporting drivers (they feed the Section 5.5 discussion but are not themselves artifact generators): `benchmark_dsmc_transport.m` and `benchmark_dsmc_extended.m`, the transport benchmarks described below; `plot_polyce_convergence.m`, which re-renders the Chapman-Enskog convergence figure from `results/polyce_results.mat`; `build_or_load_dsmc_tensor.m`, the tensor cache layer they share.
 
 ---
