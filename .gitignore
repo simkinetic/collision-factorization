@@ -1,2 +1,5 @@
 *.asv
 *.mex*
+
+results/
+src/precalc/
