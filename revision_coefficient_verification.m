@@ -29,7 +29,7 @@ idx1 = (1:K_max) * N_Q + q0(1); H1 = J(idx1, idx1); H1 = H1 / H1(1,1);
 
 % Convert from the orthonormal Laguerre basis to Chapman-Cowling's unnormalized Sonine polynomials:
 % a_pq = H_pq * sqrt(c_p c_q), c_k = Gamma(k + l + 3/2) / k!, then normalize by a_11.
-cc = @(k, l) gamma(k + l + 1.5) ./ factorial(k);
+cc = @(k, l) exp(gammaln(k + l + 1.5) - gammaln(k + 1));   % Gamma(k+l+3/2)/k!  ('gamma' is shadowed above)
 k2 = 0:K_max; A2 = H2 .* sqrt(cc(k2', 2) * cc(k2, 2)); A2 = A2 / A2(1,1);
 k1 = 1:K_max; A1 = H1 .* sqrt(cc(k1', 1) * cc(k1, 1)); A1 = A1 / A1(1,1);
 A2_exact = [1, -1/4; -1/4, 205/48]; A1_exact = [1, -1/4; -1/4, 45/16];
