@@ -51,7 +51,7 @@ fprintf('%6s %12s %12s %12s %12s\n', 'order', 'f_mu', 'PA57', 'f_lambda', 'PA57'
 for k = 1:K_max
     Hi2 = inv(H2(1:k, 1:k)); Hi1 = inv(H1(1:k, 1:k));
     fprintf('%6d %12.6f %12.6f %12.6f %12.6f\n', k, Hi2(1,1), mu_ref(k), Hi1(1,1), la_ref(k));
-    fprintf(fid, '%d,%.8f,%.6f,%.8f,%.6f\n', k, Hi2(1,1), mu_ref(k), Hi1(1,1), la_ref(k));
+    fprintf(fid, '%d,%.12f,%.6f,%.12f,%.6f\n', k, Hi2(1,1), mu_ref(k), Hi1(1,1), la_ref(k));
 end
 fclose(fid);
 Hi2 = inv(H2); Hi1 = inv(H1);
