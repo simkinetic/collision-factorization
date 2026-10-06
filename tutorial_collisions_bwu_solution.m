@@ -138,7 +138,7 @@ for k = 2:K_max
 end
 
 % 2. Format Main Axes
-xlabel('Dimensionless Time $\tau = \mu t$', 'FontSize', FS_labels);
+xlabel('Dimensionless time $\tau = |\lambda_2| t$', 'FontSize', FS_labels);
 ylabel('Spectral Amplitude $c_k(\tau)$', 'FontSize', FS_labels);
 set(ax_main, 'FontSize', FS_ticks, 'LineWidth', 1.2);
 xlim([0, 4]); 
@@ -159,14 +159,14 @@ end
 
 % 5. Format the Inset
 set(ax_inset, 'YScale', 'log', 'FontSize', FS_text, 'LineWidth', 1.0);
-title('\textbf{Exponential Decay} $|c_k|$', 'FontSize', FS_text);
+% (no inset title)
 xlim([0, 3]); 
 ylim([1e-6, 1e-1]);
 yticks(10.^(-6:2:-2)); 
 box(ax_inset, 'on');
 
 % 6. Add Dynamic Rates Text Box to the Inset (Moved to Bottom-Left)
-rate_str = {'\textbf{Decay Rates} ($\lambda_k/\mu$)', 'Num. \quad Exact'};
+rate_str = {'Decay rates $\lambda_k/\lambda_2$', 'Num. \quad WCU'};
 for k = 2:K_max
     idx = k * Basis.N_Q + 1;
     num_rate = abs(J_eq(idx, idx)) / mu;
@@ -219,7 +219,7 @@ semilogy(t_out * mu, mom_err, 'k-s', 'LineWidth', 2, 'MarkerSize', 15, ...
 semilogy(t_out * mu, energy_err, 'k-x', 'LineWidth', 2, 'MarkerSize', 15, ...
     'MarkerIndices', sub, 'DisplayName', 'Energy Error $|\Delta T|$');
 
-xlabel('Dimensionless Time $\tau = \mu t$', 'FontSize', FS_labels);
+xlabel('Dimensionless time $\tau = |\lambda_2| t$', 'FontSize', FS_labels);
 ylabel('Absolute Error $|c(t) - c(0)|$', 'FontSize', FS_labels);
 
 % Force strict log scaling and explicit ticks

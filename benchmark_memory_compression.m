@@ -17,7 +17,7 @@ set(groot, 'defaultAxesTickLabelInterpreter', 'latex');
 % CONFIGURATION: Resolution & Plot Formatting
 % ========================================================================
 K_max = 4; 
-L_vec = [2, 4, 6, 8, 10, 12];
+L_vec = [2, 4, 6, 8, 10, 12, 14, 16];
 gamma = 1.0; % Hard spheres (to match precomputed files)
 
 FS_title  = 32; 
@@ -45,31 +45,19 @@ fprintf('\nComputing memory results for K_max = %d...\n', K_max);
 for i = 1:length(L_vec)
     L = L_vec(i);
     
-    % Updated to load the new gamma-based filenames
-    filename = sprintf('collisiontensor_k%d_l%d_gamma%.2f.mat', K_max, L, gamma);
-    filepath = fullfile('src', 'precalc', filename);
+    % The counts need only the Gaunt geometry, which the constructor generates (no quadrature).
+    data.Basis = SpectralBasis(K_max, L);
+    data.TensorObj = GeneralCollisionTensor(data.Basis, ScatteringKernel(gamma));
     
-    if ~exist(filepath, 'file')
-        fprintf('  [SKIP] File missing: %s\n', filename);
-        continue;
-    end
-    
-    % Load object data
-    data = load(filepath, 'TensorObj', 'Basis');
-    
-    % Extract metadata 
-    DOF_vec(i) = data.Basis.N_terms; % Total DOFs (K_max + 1) * (L_max + 1)^2
+    DOF_vec(i) = data.Basis.N_terms; % (K_max + 1) * (L_max + 1)^2
     N_K = K_max + 1;
     N_L = max(data.TensorObj.ic_map);          
     NG_vec(i) = length(data.TensorObj.gaunt_vals);   
     
-    % Compute theoretical memory sizes in Gigabytes (8 bytes per double)
-    naive_GB(i) = (8 * (DOF_vec(i)^3)) / (1024^3);
-    R_GB(i)     = (8 * (N_K^3) * N_L) / (1024^3);
-    
-    % Sparse Gaunt tensor stored in COO format 
-    % Assuming 3x uint32 (12 bytes) + 1x double (8 bytes) = 20 bytes per nonzero
-    Gaunt_GB(i) = (20 * NG_vec(i)) / (1024^3); 
+    % Memory in decimal GB: 8 bytes per entry of R, 20 bytes per Gaunt nonzero (3 x uint32 + 1 x double)
+    naive_GB(i) = (8 * (DOF_vec(i)^3)) / 1e9;
+    R_GB(i)     = (8 * (N_K^3) * N_L) / 1e9;
+    Gaunt_GB(i) = (20 * NG_vec(i)) / 1e9; 
     
     total_fact_GB(i) = R_GB(i) + Gaunt_GB(i);
 end
@@ -85,7 +73,7 @@ for i = 1:length(L_vec)
     if isnan(total_fact_GB(i)), continue; end
     
     ratio = total_fact_GB(i) / naive_GB(i);
-    fact_MB = total_fact_GB(i) * 1024;
+    fact_MB = total_fact_GB(i) * 1000;
     
     fprintf('%-6d | %-8d | %-14d | %-15.2e | %-14.2f | %-12.2e\n', ...
         L_vec(i), DOF_vec(i), NG_vec(i), naive_GB(i), fact_MB, ratio);
@@ -98,8 +86,8 @@ fprintf('-----------------------------------------------------------------------
 fig1 = figure('Name', 'Memory Compression Profile', 'Position', [100, 100, 700, 600], 'Color', 'w');
 hold on; grid on;
 
-plot(L_vec, R_GB, 'v:', 'Color', c_phys, 'LineWidth', 2.0, 'MarkerSize', 8, 'MarkerFaceColor', c_phys);
-plot(L_vec, Gaunt_GB, '^--', 'Color', c_gaunt, 'LineWidth', 2.0, 'MarkerSize', 8, 'MarkerFaceColor', c_gaunt);
+h_R = plot(L_vec, R_GB, 'v:', 'Color', c_phys, 'LineWidth', 2.0, 'MarkerSize', 8, 'MarkerFaceColor', c_phys);
+h_G = plot(L_vec, Gaunt_GB, '^--', 'Color', c_gaunt, 'LineWidth', 2.0, 'MarkerSize', 8, 'MarkerFaceColor', c_gaunt);
 h_naive = plot(L_vec, naive_GB, 's-', 'Color', c_naive, 'LineWidth', 3.0, 'MarkerSize', 10, 'MarkerFaceColor', c_naive);
 h_total = plot(L_vec, total_fact_GB, 'o-', 'Color', c_total, 'LineWidth', 3.0, 'MarkerSize', 10, 'MarkerFaceColor', c_total);
 
@@ -109,7 +97,7 @@ xlim([min(L_vec) * 0.9, max(L_vec) * 1.1]);
 ylim([1e-6, max(naive_GB) * 5]);
 grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 
-legend([h_naive, h_total], {'\textbf{Naive Tensor}', '\textbf{Total Factorized}'}, ...
+legend([h_naive, h_total, h_G, h_R], {'\textbf{Dense Cartesian tensor}', '\textbf{Factorized (total)}', '\textbf{Gaunt tensor (COO)}', '\textbf{Impact tensor} $\mathcal{R}$'}, ...
     'Location', 'northwest', 'FontSize', FS_legend);
 
 % Dynamically place Theoretical Slope Triangles based on valid loaded data
@@ -132,7 +120,7 @@ if length(valid_idx) >= 2
 end
 
 xlabel('\textbf{Angular Resolution} ($L_{\max}$)', 'FontSize', FS_labels);
-ylabel('\textbf{Required Memory [GB]}', 'FontSize', FS_labels);
+ylabel('\textbf{Memory [GB]}', 'FontSize', FS_labels);
 set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.5);
 
 if export_to_pdf_figure
@@ -158,7 +146,7 @@ grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 yline(1.0, 'k--', 'LineWidth', 1.5, 'HandleVisibility', 'off');
 
 xlabel('\textbf{Angular Resolution} ($L_{\max}$)', 'FontSize', FS_labels);
-ylabel('\textbf{Memory Ratio} (Factorized / Naive)', 'FontSize', FS_labels);
+ylabel('\textbf{Memory ratio} (factorized / dense)', 'FontSize', FS_labels);
 set(gca, 'FontSize', FS_ticks, 'LineWidth', 1.5);
 
 if export_to_pdf_figure

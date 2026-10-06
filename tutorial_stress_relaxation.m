@@ -126,19 +126,19 @@ for k = 0:K_max
     h_num = semilogy(t_out * mu_stress, abs(c_ode(:, idx)), '-', 'Color', [colors(k+1,:), 0.8], 'LineWidth', 3);
     
     leg_h(end+1) = h_num;
-    leg_str{end+1} = sprintf('Numerical $K=%d$', k);
+    leg_str{end+1} = sprintf('$k=%d$', k);
     
     % Plot theoretical reference line for the primary mode
     if k == 0
         h_ana = semilogy(t_out * mu_stress, abs(c_analytical(:, idx)), 'k--', 'LineWidth', 2);
         leg_h(end+1) = h_ana;
-        leg_str{end+1} = 'Theoretical Exp. Decay';
+        leg_str{end+1} = '$e^{-\tau}$';
     end
 end
 
-xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
-ylabel('Absolute Spectral Amplitude $|c_{k, L=2}|$', 'FontSize', FS_labels);
-title('\textbf{Hard Sphere Anisotropic Stress Relaxation}', 'FontSize', FS_title);
+xlabel('Dimensionless time $\tau = |J_{\sigma\sigma}| t$', 'FontSize', FS_labels);
+ylabel('$|c_{k, l=2}|$', 'FontSize', FS_labels);
+% (no title)
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 xlim([0, 4]);
 ylim([1e-6, 1e-0]);
@@ -178,9 +178,9 @@ semilogy(t_out * mu_stress, mom_err, 'k-s', 'LineWidth', 2, 'MarkerSize', 12, ..
 semilogy(t_out * mu_stress, energy_err, 'k-x', 'LineWidth', 2, 'MarkerSize', 12, ...
     'MarkerIndices', sub, 'DisplayName', 'Energy Error $|\Delta T|$');
 
-xlabel('Dimensionless Time $\tau = \mu_{\mathrm{stress}} t$', 'FontSize', FS_labels);
+xlabel('Dimensionless time $\tau = |J_{\sigma\sigma}| t$', 'FontSize', FS_labels);
 ylabel('Absolute Error $|c(t) - c(0)|$', 'FontSize', FS_labels);
-title('\textbf{Conservation (Anisotropic Gas)}', 'FontSize', FS_title);
+% (no title)
 set(gca, 'YScale', 'log', 'FontSize', FS_ticks, 'LineWidth', 1.2);
 ylim([1e-18, 1e-12]); 
 yticks(10.^(-18:2:-12));

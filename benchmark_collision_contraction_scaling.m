@@ -5,7 +5,7 @@ clear; clc; close all;
 addpath('src', 'src/mex', 'src/SHL', 'src/precalc');
 
 K_max = 4;
-L_max_list = [2, 4, 6, 8, 10, 12]; % Updated to match the generated precalc files
+L_max_list = [4, 6, 8, 10, 13];
 gamma = 1.0; % Hard spheres (to match precomputed files)
 
 % save figures?
@@ -153,7 +153,7 @@ grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 
 % Legend
 legend([h_dense, h_sparse, h_radial, h_angular], ...
-    {'\textbf{Dense Cartesian Baseline}', '\textbf{Standard Sparse Contraction}', '\textbf{Radial-First Contraction}', '\textbf{Angular-First Contraction}'}, ...
+    {'\textbf{Dense Cartesian tensor}', '\textbf{Term-by-term contraction}', '\textbf{Radial-first contraction}', '\textbf{Angular-first contraction}'}, ...
     'Location', 'northwest', 'FontSize', FS_legend - 2);
 
 % Theoretical Slope Triangles (Dynamically placed on the last two points)
@@ -197,7 +197,7 @@ grid minor; set(gca, 'MinorGridLineStyle', ':', 'MinorGridAlpha', 0.4);
 
 % Baseline at y=1
 yline(1.0, 'k--', 'LineWidth', 2.0, 'HandleVisibility', 'off');
-text(L_max_list(2), 1.0 + max(s_angular)*0.03, '\textbf{Dense Baseline ($1.0\times$)}', ...
+text(L_max_list(2), 1.0 + max(s_angular)*0.03, '\textbf{Dense Cartesian tensor ($1.0\times$)}', ...
     'Interpreter', 'latex', 'FontSize', FS_text-2, 'HorizontalAlignment', 'center');
 
 % Add bold text annotations
@@ -211,7 +211,7 @@ if ~isempty(last_valid)
         'Color', c_sparse, 'FontSize', FS_text, 'HorizontalAlignment', 'center', 'Interpreter', 'latex');
 end
 
-legend({'\textbf{Standard Sparse Contraction}', '\textbf{Radial-First Contraction}', '\textbf{Angular-First Contraction}'}, ...
+legend({'\textbf{Term-by-term contraction}', '\textbf{Radial-first contraction}', '\textbf{Angular-first contraction}'}, ...
     'Location', 'northwest', 'FontSize', FS_legend - 2);
 
 xlabel('\textbf{Angular Resolution} ($L_{\max}$)', 'FontSize', FS_labels);
