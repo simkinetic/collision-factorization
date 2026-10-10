@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20403094.svg)](https://doi.org/10.5281/zenodo.20403094)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23278524.svg)](https://doi.org/10.5281/zenodo.23278524)
 
 
 # Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator
