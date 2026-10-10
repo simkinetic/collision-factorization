@@ -1,5 +1,15 @@
 *.asv
 *.mex*
+.DS_Store
 
 results/
-src/precalc/
+revision/tables/
+revision/hanke_torrilhon_maxwell_comparison.csv
+
+# figures written by the tutorial and benchmark scripts
+/fig_*.pdf
+
+# precomputed tensors: only the set used in the paper is tracked
+src/precalc/*
+!src/precalc/collisiontensor_k[0-9]_l[0-9]*_gamma[01].00.mat
+revision/impact_tensor_*.csv

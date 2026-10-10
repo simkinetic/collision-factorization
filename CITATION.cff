@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper and the software version."
+title: "Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator (code)"
+type: software
+authors:
+  - family-names: Hiemstra
+    given-names: René R.
+    orcid: "https://orcid.org/0000-0002-0179-9606"
+    affiliation: "Eindhoven University of Technology; Simkinetic"
+  - family-names: Keßler
+    given-names: Torsten
+    affiliation: "Eindhoven University of Technology; Simkinetic"
+  - family-names: Abdelmalik
+    given-names: Michael R.A.
+    affiliation: "Eindhoven University of Technology; Simkinetic"
+version: 1.1.0
+date-released: 2026-10-10
+repository-code: "https://github.com/simkinetic/collision-factorization"
+license: MIT
+preferred-citation:
+  type: article
+  title: "Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator"
+  authors:
+    - family-names: Hiemstra
+      given-names: René R.
+    - family-names: Keßler
+      given-names: Torsten
+    - family-names: Abdelmalik
+      given-names: Michael R.A.
+  journal: "Journal of Computational Physics"
+  year: 2026
+  notes: "arXiv:2605.28475"
