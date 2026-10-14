@@ -25,11 +25,14 @@ for (n,a,n1,b,n2,c),v in ht.items():
 res=[]; A={}
 for k,lst in sorted(ch.items()):
     so=sum(o*o for _,o,_ in lst); sv=sum(v*o for v,o,_ in lst); sv2=sum(v*v for v,_,_ in lst)
-    a=sv/so; A[k]=a; r=math.sqrt(max(sv2-2*a*sv+a*a*so,0)/sv2); res.append((r,k,len(lst)))
+    a=sv/so; A[k]=a
+    # residual computed directly (the expanded form sv2-2a sv+a^2 so cancels to the square root of machine epsilon)
+    r=math.sqrt(sum((v-a*o)**2 for v,o,_ in lst)/sv2); res.append((r,k,len(lst)))
 n_entries=sum(len(v) for v in ch.values()); n_multi=sum(1 for v in ch.values() if len(v)>1)
 res.sort(reverse=True)
 print(f"entries compared: {n_entries} in {len(ch)} channels ({n_multi} channels with >1 entry); l<={L}, k<={K}")
 print(f"max relative residual {res[0][0]:.2e} (channel {res[0][1]}), median {sorted(r[0] for r in res)[len(res)//2]:.2e}")
+print(f"max entry-wise relative deviation |v-a o|/max|v| over all channels: {max(abs(v-A[k]*o)/max(abs(x) for x,_,_ in lst) for k,lst in ch.items() for v,o,_ in lst):.2e}")
 # symmetry of the per-channel factor under permutations of (l1,l2,l3)
 sym=collections.defaultdict(set)
 for k,a in A.items(): sym[tuple(sorted(k))].add(round(a,9))

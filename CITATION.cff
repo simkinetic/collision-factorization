@@ -13,8 +13,8 @@ authors:
   - family-names: Abdelmalik
     given-names: Michael R.A.
     affiliation: "Eindhoven University of Technology; Simkinetic"
-version: 1.1.0
-date-released: 2026-10-10
+version: 1.1.1
+date-released: 2026-10-14
 repository-code: "https://github.com/simkinetic/collision-factorization"
 license: MIT
 preferred-citation:

@@ -6,7 +6,7 @@
 % is a genuine truncation error while the invariants stay at machine precision.
 clear; clc;
 addpath('src', 'src/mex', 'src/SHL');
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 K_max = 4; L_max = 6;
 
 % --- 3D quadrature grid for the projection (thermal scaling: weight e^{-v^2}) ---

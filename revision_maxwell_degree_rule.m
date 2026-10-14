@@ -7,7 +7,7 @@
 % Note: the null-space zeroing (l1=0: k1 in {0,1}; l1=1: k1=0) is already applied in R.
 clear; clc;
 addpath('src', 'src/mex', 'src/SHL');
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 
 cases = {};
 for L = [2, 4, 6]

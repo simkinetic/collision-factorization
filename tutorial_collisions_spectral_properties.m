@@ -15,9 +15,9 @@ fprintf('==============================================================\n\n');
 export_to_pdf_figure = false;
 
 %% 1. Initialize Phase Space & Generate the Tensor (Done Once)
-% We use K_max = 10, L_max = 2.
+% We use K_max = 4, L_max = 6 (Figure 3 and Table 8 of the paper).
 K_max = 4;  
-L_max = 2;  
+L_max = 6;  
 Basis = SpectralBasis(K_max, L_max);
 N_terms = Basis.N_terms;
 

@@ -5,14 +5,14 @@
 
 This repository contains the official MATLAB implementation of the numerical framework presented in the paper *Wigner-Eckart Factorization of the Spectral Boltzmann Collision Operator* (monatomic gases, this branch; releases v1.x). The polyatomic extension is released separately as v2.0.0 on the `polyatomic` branch.
 
-The codebase provides a complete suite to compute, compress, and evaluate the nonlinear Boltzmann collision operator using a basis of associated Laguerre polynomials and spherical harmonics. It features the singular 5D quadrature engine, the sparse Coordinate (COO) geometric routing architecture, and OpenMP-accelerated tensor contraction algorithms.
+The codebase provides a complete suite to compute, compress, and evaluate the nonlinear Boltzmann collision operator using a basis of associated Laguerre polynomials and spherical harmonics. It features the singular 5D quadrature engine, the sparse Coordinate (COO) geometric routing architecture, and the tensor contraction algorithms (sequential C++ MEX kernels; OpenMP is used in the assembly of the impact tensor).
 
 ## Repository Structure
 
 * **`src/`**: Core library containing the object-oriented MATLAB framework (`SpectralBasis`, `GeneralCollisionTensor`, `ScatteringKernel`) and the `SHL/` sub-library for spherical harmonic and Wigner 3-$j$ evaluations.
 * **`src/mex/`**: C++ source files for the heavily optimized, parallelized tensor contraction algorithms and quadrature evaluations.
 * **`src/precalc/`**: Precomputed serialized tensors (`.mat`) used in the paper: hard spheres ($\gamma=1$) at $K_{\max}=4$, $L_{\max}=2,\dots,13$ and at $K_{\max}=6,8$, $L_{\max}=12$; Maxwell molecules ($\gamma=0$) at $K_{\max}=4$, $L_{\max}=2,4,6$. Other tensors are generated with `precompute_collision_operator.m` (see the assembly costs below).
-* **`revision/`**: Scripts added for the revised version of the paper (see section 4 below).
+* **`revision/`**: Data (`data/*.csv`) and Python generators of the tables and figures of the revised paper, plus the analysis scripts (see section 4 below). The MATLAB scripts `revision_*.m` in the root write their CSV output to `revision/data/`.
 * **`tests/`**: Automated unit tests validating the spectral basis properties, spherical harmonics, quadrature reproduction, and analytical Wang Chang-Uhlenbeck (WCU) eigenvalues.
 * **Root Directory**: High-level tutorials and benchmark scripts designed to directly reproduce the figures and tables presented in the manuscript.
 
@@ -20,7 +20,7 @@ The codebase provides a complete suite to compute, compress, and evaluate the no
 
 ## Compilation Instructions (MEX & OpenMP)
 
-To achieve the execution speeds reported in the manuscript, the computational bottlenecks are implemented in C++ and compiled as MATLAB MEX functions. These functions rely heavily on **OpenMP** for multi-threading.
+To achieve the execution speeds reported in the manuscript, the computational bottlenecks are implemented in C++ and compiled as MATLAB MEX functions. The assembly kernel (`compute_rtensor_sumfac_mex.cpp`) uses **OpenMP** for multi-threading; the contraction kernels are sequential and all reported evaluation times are single-core.
 
 You must compile the `.cpp` files located in the `src/mex/` directory before running the benchmarks.
 
@@ -107,6 +107,8 @@ Each script prints its result and writes a CSV; the table or figure of the paper
 * `revision_timing_kscan.m`: execution time of the contraction orders for $K_{\max}=4,6,8$ at $L_{\max}=12$ (Table 14).
 * `revision_export_impact_tensor.m` and `revision/compare_hanke_torrilhon.py`: entry-by-entry comparison of the Maxwell-molecule impact tensor with that of Hanke & Torrilhon (2023); the latter is read from their Zenodo file `SmatrixAMX1099887766554433221100A` (10.5281/zenodo.7242835), directory given by the environment variable `HT_DIR` (Table 7).
 * `revision/opcount.py`: structural counts and operation counts of the contraction orders (Tables 3-5).
+* `revision/timing_table.py`, `comparison_tables.py`, `afp62_table.py`, `galilean_table.py`, `transport_table.py`, `assembly_table.py`, `relaxation_figure.py`: regenerate the LaTeX tables (into `revision/tables/`) and Figure 6 (into `revision/figures/`) from the CSV files in `revision/data/`, which are the outputs of the MATLAB scripts above as used in the paper.
+* `revision_timing_matched.m`: execution time of the contraction orders at $(K_{\max}, L_{\max}) = (10, 20), (4, 18), (6, 14), (8, 12), (4, 12)$ with a random impact tensor (timing does not depend on its values); `revision/data/hanke_torrilhon_timing.txt` records the run of the public code of Hanke & Torrilhon (Zenodo 10.5281/zenodo.7242835, `main.cpp` with `QmatrixMaxwellCaseRotatedA.cpp`, g++ at -O2, 200 RK4 steps, random initial coefficients) on the same machine; both from 2026-10-14, 00:27, idle machine.
 * `revision/memory_ladder.py`: memory at $L_{\max}=6,\dots,16$ and at the total-degree truncation $2k+l \le 20$ (Tables 15-16).
 
 The tutorials `tutorial_collisions_bwu_solution.m` and `tutorial_stress_relaxation.m` produce Figures 4 and 5; `tutorial_collisions_spectral_properties.m` produces Figure 3 and Table 8.

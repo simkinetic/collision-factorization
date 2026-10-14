@@ -1,0 +1,16 @@
+start Wed Oct 14 00:26:54 CEST 2026 load 1.08
+ht_rotated AMX rep1: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 194608, 973.04; in microseconds
+ht_rotated AMX rep2: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 190517, 952.585; in microseconds
+ht_rotated AMX rep3: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 190638, 953.19; in microseconds
+ht_rotated HMX rep1: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 4459540, 22297.7; in microseconds
+ht_rotated HMX rep2: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 4447873, 22239.4; in microseconds
+ht_rotated HMX rep3: 10 9 9 8 8 7 7 6 6 5 5 4 4 3 3 2 2 1 1 0 0 , 1771, 2, 200, 4456959, 22284.8; in microseconds
+ht_optimized missing
+HT done Wed Oct 14 00:27:09 CEST 2026
+K=10 L=20 N= 4851 N_T= 2486 N_G= 1751354 N_S= 59906 | term-by-term  1107.23 ms | radial-first  1654.15 ms | angular-first   153.20 ms | ratio 7.23
+K= 4 L=18 N= 1805 N_T= 1855 N_G= 1056187 N_S= 40375 | term-by-term   100.47 ms | radial-first    65.44 ms | angular-first    16.79 ms | ratio 5.98
+K= 6 L=14 N= 1575 N_T=  932 N_G=  319100 N_S= 15940 | term-by-term    70.22 ms | radial-first    60.35 ms | angular-first    10.50 ms | ratio 6.69
+K= 8 L=12 N= 1521 N_T=  616 N_G=  154330 N_S=  9100 | term-by-term    58.94 ms | radial-first    76.16 ms | angular-first     9.97 ms | ratio 5.91
+K= 4 L=12 N=  845 N_T=  616 N_G=  154330 N_S=  9100 | term-by-term    15.26 ms | radial-first     9.71 ms | angular-first     2.68 ms | ratio 5.68
+written to /private/tmp/claude-501/-Users-ekke--cosm-dev/4380a4f1-9360-4116-844f-cd63cad7da7b/scratchpad/timing_matched.csv
+all done Wed Oct 14 00:29:52 CEST 2026

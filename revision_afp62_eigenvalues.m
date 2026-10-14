@@ -8,7 +8,7 @@
 %   L_l c = mu N_l c,   N_l(k,k') = int R_kl R_k'l nu(v) v^2 e^{-v^2} dv,  nu(v) = e^{-v^2}/sqrt(pi) + (v + 1/(2v)) erf(v).
 clear; clc;
 addpath('src', 'src/mex', 'src/SHL');
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 K_max = 16; L_max = 4; gam = 1.0; pad = 16;
 Basis = SpectralBasis(K_max, L_max); Kernel = ScatteringKernel(gam);
 T = GeneralCollisionTensor(Basis, Kernel); tic; T.generate_R_tensor_sumfac(pad, pad); fprintf('assembly %.1f s\n', toc);

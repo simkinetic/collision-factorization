@@ -2,7 +2,7 @@
 % Same method as benchmark_collision_contraction_scaling.m (timeit on the MEX kernels, random coefficients).
 % The dense baseline is timed only where the dense tensor fits in memory (K_max = 4: 4.8 GB).
 clear; clc; addpath('src', 'src/mex', 'src/SHL');
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 L = 12; fid = fopen(fullfile(out_dir, 'timing_kscan.csv'), 'w');
 fprintf(fid, 'K,L,N,N_T,N_G,N_S,t_dense,t_naive,t_radial,t_angular\n');
 for K = [4 6 8]

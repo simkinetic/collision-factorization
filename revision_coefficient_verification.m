@@ -12,7 +12,7 @@
 % with Alterman, Frankowski & Pekeris 1962 once that table is available).
 clear; clc;
 addpath('src', 'src/mex', 'src/SHL');
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 K_max = 10; L_max = 4; gamma = 1.0; pad = 16;
 
 Basis = SpectralBasis(K_max, L_max); Kernel = ScatteringKernel(gamma);

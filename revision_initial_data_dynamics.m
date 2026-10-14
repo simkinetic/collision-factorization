@@ -7,7 +7,7 @@
 function revision_initial_data_dynamics(KL_list)
 addpath('src', 'src/mex', 'src/SHL');
 if nargin < 1, KL_list = {[4 8], [4 12]}; end
-out_dir = '/Users/ekke/dev/simkinetic/papers/collision-kernel-factorization/revision/data';
+out_dir = fullfile('revision', 'data'); if ~exist(out_dir, 'dir'), mkdir(out_dir); end
 bigauss = @(v) 2^1.5 / (2 * pi^1.5) * (exp(-2 * (v(:,1).^2 + v(:,2).^2 + (v(:,3) - sqrt(3)/2).^2)) + exp(-2 * (v(:,1).^2 + v(:,2).^2 + (v(:,3) + sqrt(3)/2).^2)));
 cdis = 2^1.5 * 2^0.25 * (2 - sqrt(2)) / pi^1.5;
 discont = @(v) (v(:,3) > 0) .* cdis .* exp(-sqrt(2) * sum(v.^2, 2)) + (v(:,3) <= 0) .* (cdis / 4) .* exp(-sum(v.^2, 2) / sqrt(2));

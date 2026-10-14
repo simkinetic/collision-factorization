@@ -4,6 +4,7 @@
 
 results/
 revision/tables/
+revision/figures/
 revision/hanke_torrilhon_maxwell_comparison.csv
 
 # figures written by the tutorial and benchmark scripts
